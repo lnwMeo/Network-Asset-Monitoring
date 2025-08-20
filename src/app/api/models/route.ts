@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
       data: { name, vendorId },
     })
     return NextResponse.json(m, { status: 201 })
-  } catch (error) {
+  } catch  {
     return NextResponse.json(
       { error: "Failed to create model" }, 
       { status: 500 },
