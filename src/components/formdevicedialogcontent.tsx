@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { useState } from "react"
+import { useState, useRef } from "react"
 import {
   DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
 } from "@/components/ui/dialog"
@@ -9,8 +9,12 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
+import { Card, CardContent } from "@/components/ui/card"
 import VendorDialog from "./formvendordialog"
 import ModelDialog from "./formmodeldialog"
+import DeviceTypeDialog from "./formdevicetypedialog"
+import BuildingDialog from "./frombuildingdialog"
+import RoomDialog from "./formroomdialog"
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -18,7 +22,7 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
 
-import { MoreHorizontal } from "lucide-react"
+import { MoreHorizontal, Upload, X, Star, ImageIcon } from "lucide-react"
 
 export type DeviceRow = {
   id: number
@@ -33,11 +37,14 @@ export type DeviceRow = {
   buildingCode: string
   buildingName: string
   roomName: string
+  roomId?: number | null // เพิ่ม roomId
   purchaseDate?: string | null
   installDate?: string | null
   warrantyEnd?: string | null
-  assetNumber?: string | null // รหัสครุภัณฑ์
+  assetNumber?: string | null
+  deviceTypeId?: number | null
 }
+
 type FormValues = Omit<DeviceRow, "id">
 
 interface Model {
@@ -50,7 +57,25 @@ interface Vendor {
   name: string
 }
 
-const TYPES = ["ROUTER", "SWITCH", "ACCESS_POINT", "FIREWALL", "SERVER", "PC", "LAPTOP", "PRINTER", "UPS"]
+interface DeviceType {
+  id: number
+  name: string
+}
+
+interface Room {
+  id: number
+  name: string
+  buildingId: number
+}
+
+interface DeviceImage {
+  id?: number
+  file?: File
+  url: string
+  originalName: string
+  isPrimary: boolean
+  isNew?: boolean
+}
 
 export default function FormDeviceDialogContent({
   mode = "create",
@@ -59,7 +84,7 @@ export default function FormDeviceDialogContent({
 }: {
   mode?: "create" | "edit"
   initial?: Partial<FormValues>
-  onSubmit: (values: FormValues) => void
+  onSubmit: (values: FormValues, images: DeviceImage[]) => void
 }) {
   const [form, setForm] = React.useState<FormValues>({
     assetTag: "",
@@ -73,12 +98,19 @@ export default function FormDeviceDialogContent({
     buildingCode: "",
     buildingName: "",
     roomName: "",
+    roomId: null, // เพิ่มค่าเริ่มต้น
     purchaseDate: "",
     installDate: "",
     warrantyEnd: "",
     assetNumber: "",
+    deviceTypeId: null,
     ...initial,
   })
+
+  // =============== Image Upload ===============
+  const [images, setImages] = useState<DeviceImage[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   React.useEffect(() => {
     if (initial) setForm((prev) => ({ ...prev, ...initial }))
@@ -88,13 +120,62 @@ export default function FormDeviceDialogContent({
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  // =============== Image Functions ===============
+  const handleFileSelect = (files: FileList | null) => {
+    if (!files || files.length === 0) return
+
+    const newImages: DeviceImage[] = []
+
+    Array.from(files).forEach((file, index) => {
+      if (file.type.startsWith('image/')) {
+        const url = URL.createObjectURL(file)
+        newImages.push({
+          file,
+          url,
+          originalName: file.name,
+          isPrimary: images.length === 0 && index === 0,
+          isNew: true
+        })
+      }
+    })
+
+    setImages(prev => [...prev, ...newImages])
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const removeImage = (index: number) => {
+    setImages(prev => {
+      const newImages = prev.filter((_, i) => i !== index)
+
+      if (prev[index].isPrimary && newImages.length > 0) {
+        newImages[0].isPrimary = true
+      }
+
+      if (prev[index].url.startsWith('blob:')) {
+        URL.revokeObjectURL(prev[index].url)
+      }
+
+      return newImages
+    })
+  }
+
+  const setPrimaryImage = (index: number) => {
+    setImages(prev => prev.map((img, i) => ({
+      ...img,
+      isPrimary: i === index
+    })))
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.assetTag || !form.name || !form.type || !form.buildingName || !form.roomName) {
       alert("กรุณากรอกข้อมูลที่จำเป็นให้ครบ")
       return
     }
-    onSubmit(form)
+    onSubmit(form, images)
   }
 
   // =============== Vendor ===========
@@ -110,243 +191,566 @@ export default function FormDeviceDialogContent({
       .catch(err => console.error("Error fetching vendors:", err))
   }, [])
 
+  // =============== DeviceType =============
+  const [devicetypes, setDevicetypes] = React.useState<DeviceType[]>([])
+  const [addDevicetypeOpen, setAddDevicetypeOpen] = useState(false)
+  const [editDevicetypeOpen, setEditDevicetypeOpen] = useState(false)
+  const [editingDevicetype, setEditingDevicetype] = useState<DeviceType | null>(null)
+
+  React.useEffect(() => {
+    fetch("/api/devicetypes")
+      .then(r => r.json())
+      .then(setDevicetypes)
+      .catch(err => console.error("Error fetching devicetypes:", err))
+  }, [])
+
   // =============== Model =============
   const [models, setModels] = React.useState<Model[]>([])
   const [addModelOpen, setAddModelOpen] = React.useState(false)
   const [editModelOpen, setEditModelOpen] = React.useState(false)
   const [editingModel, setEditingModel] = React.useState<Model | null>(null)
 
-  // ✅ แก้ไข useEffect สำหรับ model loading
   React.useEffect(() => {
     if (!form.vendor) {
       setModels([])
-      update("model", "") // ล้าง model เมื่อไม่มี vendor
+      update("model", "")
       return
     }
-    
+
     const selectedVendor = vendors.find(v => v.name === form.vendor)
     if (selectedVendor) {
       fetch(`/api/models?vendorId=${selectedVendor.id}`)
         .then(r => r.json())
         .then((res) => {
           setModels(res)
-          // ✅ ไม่ reset model หากมี model อยู่แล้วและ model นั้นอยู่ใน list ใหม่
           if (form.model && !res.some((m: Model) => m.name === form.model)) {
             update("model", "")
           }
         })
         .catch(err => console.error("Error fetching models:", err))
     }
-  }, [form.vendor, vendors]) // ✅ ลบ form.model ออกจาก dependencies
+  }, [form.vendor, vendors])
+
+  // =============== Buildings & Rooms =============
+  const [buildings, setBuildings] = useState<{ id: number, code: string, name: string }[]>([])
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [addBuildingOpen, setAddBuildingOpen] = useState(false)
+  const [editBuildingOpen, setEditBuildingOpen] = useState(false)
+  const [editingBuilding, setEditingBuilding] = useState<{ id: number, code: string, name: string } | null>(null)
+  const [addRoomOpen, setAddRoomOpen] = useState(false)
+  const [editRoomOpen, setEditRoomOpen] = useState(false)
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null)
+
+  React.useEffect(() => {
+    fetch("/api/buildings")
+      .then(r => r.json())
+      .then(setBuildings)
+  }, [])
+
+  // Fetch rooms when building changes
+  React.useEffect(() => {
+    if (!form.buildingCode) {
+      setRooms([])
+      update("roomName", "")
+      update("roomId", null)
+      return
+    }
+
+    const selectedBuilding = buildings.find(b => b.code === form.buildingCode)
+    if (selectedBuilding) {
+      fetch(`/api/rooms?buildingId=${selectedBuilding.id}`)
+        .then(r => r.json())
+        .then((res) => {
+          setRooms(res)
+          if (form.roomName && !res.some((r: Room) => r.name === form.roomName)) {
+            update("roomName", "")
+            update("roomId", null)
+          }
+        })
+        .catch(err => console.error("Error fetching rooms:", err))
+    }
+  }, [form.buildingCode, buildings])
 
   return (
-    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+    <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
       <DialogHeader>
         <DialogTitle>{mode === "edit" ? "แก้ไขอุปกรณ์" : "เพิ่มอุปกรณ์ใหม่"}</DialogTitle>
       </DialogHeader>
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="grid gap-2">
-          <Label htmlFor="assetTag">Asset Tag *</Label>
-          <Input id="assetTag" value={form.assetTag} onChange={(e) => update("assetTag", e.target.value)} required />
-        </div>
-        
-        <div className="grid gap-2">
-          <Label htmlFor="name">ชื่ออุปกรณ์ *</Label>
-          <Input id="name" value={form.name} onChange={(e) => update("name", e.target.value)} required />
-        </div>
-        
-        <div className="grid gap-2">
-          <Label>ประเภท *</Label>
-          <Select value={form.type} onValueChange={(v) => update("type", v)}>
-            <SelectTrigger><SelectValue placeholder="เลือกประเภท" /></SelectTrigger>
-            <SelectContent>
-              {TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        
-        <div className="grid gap-2">
-          <Label htmlFor="assetNumber">รหัสครุภัณฑ์</Label>
-          <Input id="assetNumber" value={form.assetNumber ?? ""} onChange={(e) => update("assetNumber", e.target.value)} />
-        </div>
-
-        {/* =============== Vendor Section =============== */}
-        <div className="grid gap-2">
-          <Label htmlFor="vendor">Vendor</Label>
-          <div className="flex gap-2">
-            <Select
-              value={form.vendor ?? ""}
-              onValueChange={(v) => {
-                if (v === "__add__") {
-                  setAddVendorOpen(true)
-                } else {
-                  update("vendor", v)
-                }
-              }}
-            >
-              <SelectTrigger className="flex-1"><SelectValue placeholder="เลือก Vendor" /></SelectTrigger>
-              <SelectContent>
-                {vendors.map((v) => (
-                  <SelectItem key={v.id} value={v.name}>{v.name}</SelectItem>
-                ))}
-                <SelectItem value="__add__" className="text-blue-500">+ เพิ่ม Vendor ใหม่...</SelectItem>
-              </SelectContent>
-            </Select>
-            {form.vendor && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      const selectedVendor = vendors.find(v => v.name === form.vendor)
-                      if (selectedVendor) {
-                        setEditingVendor(selectedVendor)
-                        setEditVendorOpen(true)
-                      }
-                    }}
-                  >
-                    แก้ไข
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="text-red-500"
-                    onSelect={async () => {
-                      const selectedVendor = vendors.find(v => v.name === form.vendor)
-                      if (selectedVendor && confirm("ลบ vendor นี้?")) {
-                        try {
-                          await fetch(`/api/vendors/${selectedVendor.id}`, { method: "DELETE" })
-                          setVendors(prev => prev.filter(it => it.id !== selectedVendor.id))
-                          update("vendor", "")
-                        } catch (err) {
-                          console.error("Error deleting vendor:", err)
-                          alert("เกิดข้อผิดพลาดในการลบ vendor")
-                        }
-                      }
-                    }}
-                  >
-                    ลบ
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Basic Information */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid gap-2">
+            <Label htmlFor="assetTag">Asset Tag *</Label>
+            <Input id="assetTag" value={form.assetTag} onChange={(e) => update("assetTag", e.target.value)} required />
           </div>
-        </div>
 
-        {/* =============== Model Section =============== */}
-        <div className="grid gap-2">
-          <Label htmlFor="model">Model</Label>
-          <div className="flex gap-2">
-            <Select
-              value={form.model ?? ""}
-              onValueChange={(v) => {
-                if (v === "__add__") {
-                  if (!form.vendor) {
-                    alert("กรุณาเลือก Vendor ก่อน")
-                    return
+          <div className="grid gap-2">
+            <Label htmlFor="name">ชื่ออุปกรณ์ *</Label>
+            <Input id="name" value={form.name} onChange={(e) => update("name", e.target.value)} required />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="devicetype">ประเภท *</Label>
+            <div className="flex gap-2">
+              <Select
+                value={form.deviceTypeId?.toString() ?? ""}
+                onValueChange={(value) => {
+                  if (value === "__add__") {
+                    setAddDevicetypeOpen(true)
+                  } else {
+                    const deviceType = devicetypes.find(d => d.id.toString() === value)
+                    if (deviceType) {
+                      update("deviceTypeId", deviceType.id)
+                      update("type", deviceType.name)
+                    }
                   }
-                  setAddModelOpen(true)
-                } else {
-                  update("model", v)
-                }
-              }}
-              disabled={!form.vendor}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={!form.vendor ? "เลือก Vendor ก่อน" : "เลือก Model"} />
-              </SelectTrigger>
-              <SelectContent>
-                {models.map(m => (
-                  <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
-                ))}
-                {form.vendor && (
-                  <SelectItem value="__add__" className="text-blue-500">+ เพิ่ม Model ใหม่...</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-            {form.model && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      const selectedModel = models.find(m => m.name === form.model)
-                      if (selectedModel) {
-                        setEditingModel(selectedModel)
-                        setEditModelOpen(true)
-                      }
-                    }}
-                  >
-                    แก้ไข
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className="text-red-500"
-                    onSelect={async () => {
-                      const selectedModel = models.find(m => m.name === form.model)
-                      if (selectedModel && confirm("ลบ model นี้?")) {
-                        try {
-                          await fetch(`/api/models/${selectedModel.id}`, { method: "DELETE" })
-                          setModels(p => p.filter(i => i.id !== selectedModel.id))
-                          update("model", "")
-                        } catch (err) {
-                          console.error("Error deleting model:", err)
-                          alert("เกิดข้อผิดพลาดในการลบ model")
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="เลือกประเภท" /></SelectTrigger>
+                <SelectContent>
+                  {devicetypes.map((d) => (
+                    <SelectItem key={d.id} value={d.id.toString()}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="__add__" className="text-blue-500">
+                    + เพิ่ม DeviceType ใหม่...
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              {form.deviceTypeId && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        const selectedDeviceType = devicetypes.find(d => d.id === form.deviceTypeId)
+                        if (selectedDeviceType) {
+                          setEditingDevicetype(selectedDeviceType)
+                          setEditDevicetypeOpen(true)
                         }
-                      }
-                    }}
-                  >
-                    ลบ
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+                      }}
+                    >
+                      แก้ไข
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-red-500"
+                      onSelect={async () => {
+                        const selectedDeviceType = devicetypes.find(d => d.id === form.deviceTypeId)
+                        if (selectedDeviceType && confirm("ลบ device type นี้?")) {
+                          try {
+                            await fetch(`/api/devicetypes/${selectedDeviceType.id}`, { method: "DELETE" })
+                            setDevicetypes(prev => prev.filter(it => it.id !== selectedDeviceType.id))
+                            update("deviceTypeId", null)
+                            update("type", "")
+                          } catch (err) {
+                            console.error("Error deleting device type:", err)
+                            alert("เกิดข้อผิดพลาดในการลบ device type")
+                          }
+                        }
+                      }}
+                    >
+                      ลบ
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="assetNumber">รหัสครุภัณฑ์</Label>
+            <Input id="assetNumber" value={form.assetNumber ?? ""} onChange={(e) => update("assetNumber", e.target.value)} />
+          </div>
+
+          {/* Vendor Section */}
+          <div className="grid gap-2">
+            <Label htmlFor="vendor">Vendor</Label>
+            <div className="flex gap-2">
+              <Select
+                value={form.vendor ?? ""}
+                onValueChange={(v) => {
+                  if (v === "__add__") {
+                    setAddVendorOpen(true)
+                  } else {
+                    update("vendor", v)
+                  }
+                }}
+              >
+                <SelectTrigger className="flex-1"><SelectValue placeholder="เลือก Vendor" /></SelectTrigger>
+                <SelectContent>
+                  {vendors.map((v) => (
+                    <SelectItem key={v.id} value={v.name}>{v.name}</SelectItem>
+                  ))}
+                  <SelectItem value="__add__" className="text-blue-500">+ เพิ่ม Vendor ใหม่...</SelectItem>
+                </SelectContent>
+              </Select>
+              {form.vendor && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        const selectedVendor = vendors.find(v => v.name === form.vendor)
+                        if (selectedVendor) {
+                          setEditingVendor(selectedVendor)
+                          setEditVendorOpen(true)
+                        }
+                      }}
+                    >
+                      แก้ไข
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-red-500"
+                      onSelect={async () => {
+                        const selectedVendor = vendors.find(v => v.name === form.vendor)
+                        if (selectedVendor && confirm("ลบ vendor นี้?")) {
+                          try {
+                            await fetch(`/api/vendors/${selectedVendor.id}`, { method: "DELETE" })
+                            setVendors(prev => prev.filter(it => it.id !== selectedVendor.id))
+                            update("vendor", "")
+                          } catch (err) {
+                            console.error("Error deleting vendor:", err)
+                            alert("เกิดข้อผิดพลาดในการลบ vendor")
+                          }
+                        }
+                      }}
+                    >
+                      ลบ
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </div>
+
+          {/* Model Section */}
+          <div className="grid gap-2">
+            <Label htmlFor="model">Model</Label>
+            <div className="flex gap-2">
+              <Select
+                value={form.model ?? ""}
+                onValueChange={(v) => {
+                  if (v === "__add__") {
+                    if (!form.vendor) {
+                      alert("กรุณาเลือก Vendor ก่อน")
+                      return
+                    }
+                    setAddModelOpen(true)
+                  } else {
+                    update("model", v)
+                  }
+                }}
+                disabled={!form.vendor}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={!form.vendor ? "เลือก Vendor ก่อน" : "เลือก Model"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {models.map(m => (
+                    <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
+                  ))}
+                  {form.vendor && (
+                    <SelectItem value="__add__" className="text-blue-500">+ เพิ่ม Model ใหม่...</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              {form.model && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        const selectedModel = models.find(m => m.name === form.model)
+                        if (selectedModel) {
+                          setEditingModel(selectedModel)
+                          setEditModelOpen(true)
+                        }
+                      }}
+                    >
+                      แก้ไข
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-red-500"
+                      onSelect={async () => {
+                        const selectedModel = models.find(m => m.name === form.model)
+                        if (selectedModel && confirm("ลบ model นี้?")) {
+                          try {
+                            await fetch(`/api/models/${selectedModel.id}`, { method: "DELETE" })
+                            setModels(p => p.filter(i => i.id !== selectedModel.id))
+                            update("model", "")
+                          } catch (err) {
+                            console.error("Error deleting model:", err)
+                            alert("เกิดข้อผิดพลาดในการลบ model")
+                          }
+                        }
+                      }}
+                    >
+                      ลบ
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="ip">IP Address</Label>
+            <Input id="ip" value={form.ip ?? ""} onChange={(e) => update("ip", e.target.value)} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="mac">MAC</Label>
+            <Input id="mac" value={form.mac ?? ""} onChange={(e) => update("mac", e.target.value)} />
+          </div>
+
+          {/* Building Section */}
+          <div className="grid gap-2">
+            <Label>อาคาร *</Label>
+            <div className="flex gap-2">
+              <Select
+                value={form.buildingCode}
+                onValueChange={(v) => {
+                  if (v === "__add__") {
+                    setAddBuildingOpen(true)
+                  } else {
+                    const b = buildings.find(b => b.code === v)
+                    if (b) {
+                      update("buildingCode", b.code)
+                      update("buildingName", b.name)
+                    }
+                  }
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="เลือกอาคาร" /></SelectTrigger>
+                <SelectContent>
+                  {buildings.map(b => (
+                    <SelectItem key={b.id} value={b.code}>{b.code} - {b.name}</SelectItem>
+                  ))}
+                  <SelectItem value="__add__" className="text-blue-500">+ เพิ่มอาคารใหม่...</SelectItem>
+                </SelectContent>
+              </Select>
+              {form.buildingCode && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onSelect={() => {
+                      const b = buildings.find(bb => bb.code === form.buildingCode)
+                      if (b) { setEditingBuilding(b); setEditBuildingOpen(true) }
+                    }}>แก้ไข</DropdownMenuItem>
+                    <DropdownMenuItem className="text-red-500"
+                      onSelect={async () => {
+                        const b = buildings.find(bb => bb.code === form.buildingCode)
+                        if (b && confirm("ลบ building นี้?")) {
+                          await fetch(`/api/buildings/${b.id}`, { method: "DELETE" })
+                          setBuildings(prev => prev.filter(it => it.id !== b.id))
+                          update("buildingCode", "")
+                          update("buildingName", "")
+                        }
+                      }}>ลบ</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </div>
+
+          {/* Room Section */}
+          <div className="grid gap-2">
+            <Label htmlFor="room">ห้อง *</Label>
+            <div className="flex gap-2">
+              <Select
+                value={form.roomId?.toString() ?? ""}
+                onValueChange={(v) => {
+                  if (v === "__add__") {
+                    if (!form.buildingCode) {
+                      alert("กรุณาเลือกอาคารก่อน")
+                      return
+                    }
+                    setAddRoomOpen(true)
+                  } else {
+                    const room = rooms.find(r => r.id.toString() === v)
+                    if (room) {
+                      update("roomId", room.id)
+                      update("roomName", room.name)
+                    }
+                  }
+                }}
+                disabled={!form.buildingCode}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={!form.buildingCode ? "เลือกอาคารก่อน" : "เลือกห้อง"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {rooms.map(r => (
+                    <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
+                  ))}
+                  {form.buildingCode && (
+                    <SelectItem value="__add__" className="text-blue-500">+ เพิ่มห้องใหม่...</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              {form.roomId && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        const selectedRoom = rooms.find(r => r.id === form.roomId)
+                        if (selectedRoom) {
+                          setEditingRoom(selectedRoom)
+                          setEditRoomOpen(true)
+                        }
+                      }}
+                    >
+                      แก้ไข
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-red-500"
+                      onSelect={async () => {
+                        const selectedRoom = rooms.find(r => r.id === form.roomId)
+                        if (selectedRoom && confirm("ลบห้องนี้?")) {
+                          try {
+                            await fetch(`/api/rooms/${selectedRoom.id}`, { method: "DELETE" })
+                            setRooms(prev => prev.filter(it => it.id !== selectedRoom.id))
+                            update("roomId", null)
+                            update("roomName", "")
+                          } catch (err) {
+                            console.error("Error deleting room:", err)
+                            alert("เกิดข้อผิดพลาดในการลบห้อง")
+                          }
+                        }
+                      }}
+                    >
+                      ลบ
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="purchaseDate">วันที่ซื้อ</Label>
+            <Input id="purchaseDate" type="date" value={form.purchaseDate ?? ""} onChange={(e) => update("purchaseDate", e.target.value)} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="installDate">วันที่ติดตั้ง</Label>
+            <Input id="installDate" type="date" value={form.installDate ?? ""} onChange={(e) => update("installDate", e.target.value)} />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="warrantyEnd">สิ้นสุดประกัน</Label>
+            <Input id="warrantyEnd" type="date" value={form.warrantyEnd ?? ""} onChange={(e) => update("warrantyEnd", e.target.value)} />
           </div>
         </div>
 
-        <div className="grid gap-2">
-          <Label htmlFor="ip">IP Address</Label>
-          <Input id="ip" value={form.ip ?? ""} onChange={(e) => update("ip", e.target.value)} />
+        {/* =============== Image Upload Section =============== */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-4">
+            <Label className="text-base font-medium">รูปภาพอุปกรณ์</Label>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              <Upload size={16} className="mr-2" />
+              {uploading ? 'กำลังอัพโหลด...' : 'เพิ่มรูปภาพ'}
+            </Button>
+            <Input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => handleFileSelect(e.target.files)}
+            />
+          </div>
+
+          {images.length > 0 ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {images.map((image, index) => (
+                <Card key={index} className="relative group">
+                  <CardContent className="p-2">
+                    <div className="aspect-square relative">
+                      <img
+                        src={image.url}
+                        alt={image.originalName}
+                        className="w-full h-full object-cover rounded"
+                      />
+
+                      {/* Primary badge */}
+                      {image.isPrimary && (
+                        <div className="absolute top-2 left-2 bg-yellow-500 text-white px-2 py-1 rounded text-xs flex items-center gap-1">
+                          <Star size={12} fill="currentColor" />
+                          หลัก
+                        </div>
+                      )}
+
+                      {/* Action buttons */}
+                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                        {!image.isPrimary && images.length > 1 && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setPrimaryImage(index)}
+                            className="h-6 w-6 p-0"
+                          >
+                            <Star size={12} />
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => removeImage(index)}
+                          className="h-6 w-6 p-0"
+                        >
+                          <X size={12} />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground mt-2 truncate">
+                      {image.originalName}
+                    </p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-8">
+              <div className="flex flex-col items-center justify-center text-center">
+                <ImageIcon size={48} className="text-muted-foreground/50 mb-4" />
+                <p className="text-sm text-muted-foreground mb-2">ยังไม่มีรูปภาพ</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  เลือกรูปภาพ
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="grid gap-2">
-          <Label htmlFor="mac">MAC</Label>
-          <Input id="mac" value={form.mac ?? ""} onChange={(e) => update("mac", e.target.value)} />
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="buildingCode">รหัสอาคาร *</Label>
-          <Input id="buildingCode" value={form.buildingCode} onChange={(e) => update("buildingCode", e.target.value)} required />
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="buildingName">ชื่ออาคาร *</Label>
-          <Input id="buildingName" value={form.buildingName} onChange={(e) => update("buildingName", e.target.value)} required />
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="roomName">ห้อง *</Label>
-          <Input id="roomName" value={form.roomName} onChange={(e) => update("roomName", e.target.value)} required />
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="purchaseDate">วันที่ซื้อ</Label>
-          <Input id="purchaseDate" type="date" value={form.purchaseDate ?? ""} onChange={(e) => update("purchaseDate", e.target.value)} />
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="installDate">วันที่ติดตั้ง</Label>
-          <Input id="installDate" type="date" value={form.installDate ?? ""} onChange={(e) => update("installDate", e.target.value)} />
-        </div>
-
-        <div className="grid gap-2">
-          <Label htmlFor="warrantyEnd">สิ้นสุดประกัน</Label>
-          <Input id="warrantyEnd" type="date" value={form.warrantyEnd ?? ""} onChange={(e) => update("warrantyEnd", e.target.value)} />
-        </div>
-
-        <DialogFooter className="col-span-1 md:col-span-2 gap-2">
+        <DialogFooter className="gap-2">
           <DialogClose asChild>
             <Button type="button" variant="outline">ยกเลิก</Button>
           </DialogClose>
@@ -467,6 +871,177 @@ export default function FormDeviceDialogContent({
           }}
         />
       )}
+
+      {/* DeviceType Dialogs */}
+      <DeviceTypeDialog
+        open={addDevicetypeOpen}
+        setOpen={setAddDevicetypeOpen}
+        title="เพิ่ม DeviceType ใหม่"
+        initialName=""
+        onSave={async (name) => {
+          try {
+            const res = await fetch("/api/devicetypes", {
+              method: "POST",
+              body: JSON.stringify({ name }),
+              headers: { "Content-Type": "application/json" },
+            })
+            if (!res.ok) throw new Error("Failed to create device type")
+            const d = await res.json()
+            setDevicetypes(prev => [...prev, d])
+            update("deviceTypeId", d.id)
+            update("type", d.name)
+          } catch (err) {
+            console.error("Error creating device type:", err)
+            alert("เกิดข้อผิดพลาดในการสร้าง device type")
+          }
+        }}
+      />
+
+      {editingDevicetype && (
+        <DeviceTypeDialog
+          open={editDevicetypeOpen}
+          setOpen={(open) => {
+            setEditDevicetypeOpen(open)
+            if (!open) setEditingDevicetype(null)
+          }}
+          title="แก้ไข DeviceType"
+          initialName={editingDevicetype.name}
+          onSave={async (name) => {
+            try {
+              const res = await fetch(`/api/devicetypes/${editingDevicetype.id}`, {
+                method: "PUT",
+                body: JSON.stringify({ name }),
+                headers: { "Content-Type": "application/json" },
+              })
+              if (!res.ok) throw new Error("Failed to update device type")
+              setDevicetypes(prev => prev.map((it) => it.id === editingDevicetype.id ? { ...it, name } : it))
+              update("type", name)
+            } catch (err) {
+              console.error("Error updating device type:", err)
+              alert("เกิดข้อผิดพลาดในการแก้ไข device type")
+            }
+          }}
+        />
+      )}
+
+      {/* Building Dialogs */}
+      <BuildingDialog
+        open={addBuildingOpen}
+        setOpen={setAddBuildingOpen}
+        title="เพิ่มอาคาร"
+        initialCode=""
+        initialName=""
+        onSave={async (code, name) => {
+          try {
+            const res = await fetch("/api/buildings", {
+              method: "POST",
+              body: JSON.stringify({ code, name }),
+              headers: { "Content-Type": "application/json" }
+            })
+            if (!res.ok) throw new Error("Failed to create building")
+            const b = await res.json()
+            setBuildings(prev => [...prev, b])
+            update("buildingCode", b.code)
+            update("buildingName", b.name)
+          } catch (err) {
+            console.error("Error creating building:", err)
+            alert("เกิดข้อผิดพลาดในการสร้างอาคาร")
+          }
+        }}
+      />
+
+      {editingBuilding && (
+        <BuildingDialog
+          open={editBuildingOpen}
+          setOpen={(o) => { setEditBuildingOpen(o); if (!o) setEditingBuilding(null) }}
+          title="แก้ไขอาคาร"
+          initialCode={editingBuilding.code}
+          initialName={editingBuilding.name}
+          onSave={async (code, name) => {
+            try {
+              const res = await fetch(`/api/buildings/${editingBuilding.id}`, {
+                method: "PUT", 
+                body: JSON.stringify({ code, name }),
+                headers: { "Content-Type": "application/json" }
+              })
+              if (!res.ok) throw new Error("Failed to update building")
+              const upd = await res.json()
+              setBuildings(prev => prev.map(it => it.id === upd.id ? upd : it))
+              update("buildingCode", upd.code)
+              update("buildingName", upd.name)
+            } catch (err) {
+              console.error("Error updating building:", err)
+              alert("เกิดข้อผิดพลาดในการแก้ไขอาคาร")
+            }
+          }}
+        />
+      )}
+
+      {/* Room Dialogs */}
+      <RoomDialog
+        open={addRoomOpen}
+        setOpen={setAddRoomOpen}
+        title="เพิ่มห้องใหม่"
+        initialName=""
+        onSave={async (name) => {
+          try {
+            const selectedBuilding = buildings.find(b => b.code === form.buildingCode)
+            if (!selectedBuilding) {
+              alert("ไม่พบอาคารที่เลือก")
+              return
+            }
+
+            const res = await fetch("/api/rooms", {
+              method: "POST",
+              body: JSON.stringify({
+                name,
+                buildingId: selectedBuilding.id
+              }),
+              headers: { "Content-Type": "application/json" },
+            })
+            if (!res.ok) throw new Error("Failed to create room")
+            const r = await res.json()
+
+            setRooms(prev => {
+              if (prev.some(item => item.id === r.id || item.name === r.name)) return prev
+              return [...prev, r]
+            })
+            update("roomId", r.id)
+            update("roomName", r.name)
+          } catch (err) {
+            console.error("Error creating room:", err)
+            alert("เกิดข้อผิดพลาดในการสร้างห้อง")
+          }
+        }}
+      />
+
+      {editingRoom && (
+        <RoomDialog
+          open={editRoomOpen}
+          setOpen={(open) => {
+            setEditRoomOpen(open)
+            if (!open) setEditingRoom(null)
+          }}
+          title="แก้ไขห้อง"
+          initialName={editingRoom.name}
+          onSave={async (name) => {
+            try {
+              const res = await fetch(`/api/rooms/${editingRoom.id}`, {
+                method: "PUT",
+                body: JSON.stringify({ name }),
+                headers: { "Content-Type": "application/json" },
+              })
+              if (!res.ok) throw new Error("Failed to update room")
+              setRooms(prev => prev.map((it) => it.id === editingRoom.id ? { ...it, name } : it))
+              update("roomName", name)
+            } catch (err) {
+              console.error("Error updating room:", err)
+              alert("เกิดข้อผิดพลาดในการแก้ไขห้อง")
+            }
+          }}
+        />
+      )}
+
     </DialogContent>
   )
 }
