@@ -15,7 +15,7 @@ import {
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { Dialog, DialogTrigger } from "@/components/ui/dialog";
 import FormDeviceDialogContent from "@/components/formdevicedialogcontent";
-import DataDeviceDialogContent from "@/components/datadevicedialog"
+import DataDeviceDialogContent from "@/components/datadevicedialog";
 import {
   arrayMove,
   SortableContext,
@@ -54,11 +54,11 @@ import {
 import type { DeviceRow } from "@/schemas/deviceSchema";
 
 import { DeviceDrawer } from "@/components/DeviceDrawer";
-import { StatusBadge } from "@/utils/statusbadge";
+// import { StatusBadge } from "@/utils/statusbadge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 import {
   DropdownMenu,
@@ -88,11 +88,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { daysBetween, daysUntil, ageLabel } from "@/utils/agedevice";
-
-
-
-// =====================
+import { daysBetween, daysUntil, ageLabel,formatDaysUntil } from "@/utils/agedevice";
 
 
 // =====================
@@ -113,8 +109,6 @@ function DragHandle({ id }: { id: number }) {
     </Button>
   );
 }
-
-
 
 function DraggableRow({ row }: { row: Row<DeviceRow> }) {
   const { transform, transition, setNodeRef, isDragging } = useSortable({
@@ -144,11 +138,14 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
   // Dialog (create/edit)
   const [deviceDialogOpen, setDeviceDialogOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<DeviceRow | null>(null);
-  // 🔎 เพิ่ม: Dialog (detail)
-  const [detailOpen, setDetailOpen] = React.useState(false)
-  const [detailItem, setDetailItem] = React.useState<DeviceRow | null>(null)
+  // Dialog (detail)
+  const [detailOpen, setDetailOpen] = React.useState(false);
+  const [detailItem, setDetailItem] = React.useState<DeviceRow | null>(null);
+
   // Table states
   const [data, setData] = React.useState<DeviceRow[]>(() => initialData);
+  React.useEffect(() => setData(initialData), [initialData]); // ✅ sync เมื่อ props เปลี่ยน
+
   const [showSuccess, setShowSuccess] = React.useState(false);
   const [rowSelection, setRowSelection] = React.useState({});
   const [columnVisibility, setColumnVisibility] =
@@ -177,6 +174,52 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
     [data]
   );
 
+  // ====== DeviceStatus map (id -> object) เพื่อ lookup ชื่อจาก statusId ======
+  type DeviceStatus = { id: number; name: string; color?: string };
+  const [statusMap, setStatusMap] = React.useState<
+    Record<number, DeviceStatus>
+  >({});
+
+  React.useEffect(() => {
+    fetch("/api/devicestatus")
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((list: DeviceStatus[]) => {
+        const m: Record<number, DeviceStatus> = {};
+        list.forEach((s) => {
+          m[s.id] = s;
+        });
+        setStatusMap(m);
+      })
+      .catch(() => {
+        // เงียบได้ — ถ้าโหลดไม่ได้ยังแสดงผลได้จาก string/object เดิม
+      });
+  }, []);
+
+  // helper: คืนชื่อสถานะจากรูปแบบข้อมูลที่มี (string | object | statusId)
+  const getStatusName = React.useCallback(
+    (r: DeviceRow): string => {
+      const statusObj = r.status;
+      const statusName = r.statusName;
+      const statusString = r.status;
+      const statusId = r.statusId;
+
+      if (typeof statusObj === "object" && statusObj?.name) {
+        return String(statusObj.name);
+      }
+      if (typeof statusName === "string" && statusName) {
+        return statusName;
+      }
+      if (typeof statusString === "string" && statusString) {
+        return statusString;
+      }
+      if (typeof statusId === "number" && statusMap[statusId]?.name) {
+        return statusMap[statusId].name;
+      }
+      return "UNKNOWN";
+    },
+    [statusMap]
+  );
+
   // Global filter (multi-field)
   const multiFieldGlobalFilter: FilterFn<DeviceRow> = (
     row,
@@ -185,7 +228,6 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
   ) => {
     if (!filterValue) return true;
     const q = String(filterValue).toLowerCase();
-
     const r = row.original;
     const val = (s?: string | null) => (s ?? "").toLowerCase();
 
@@ -193,7 +235,8 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
       val(r.assetTag).includes(q) ||
       val(r.name).includes(q) ||
       val(r.type).includes(q) ||
-      val(r.status).includes(q) ||
+      val(r.deviceId).includes(q) ||
+      getStatusName(r).toLowerCase().includes(q) || // ✅ ค้นหาตามชื่อสถานะจริง
       val(r.vendor).includes(q) ||
       val(r.model).includes(q) ||
       val(r.ip).includes(q) ||
@@ -206,7 +249,8 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
 
   // Filter options
   const buildingOptions = React.useMemo(
-    () => Array.from(new Set(data.map((d) => d.buildingName).filter(Boolean))).sort(),
+    () =>
+      Array.from(new Set(data.map((d) => d.buildingName).filter(Boolean))).sort(),
     [data]
   );
   const typeOptions = React.useMemo(
@@ -214,11 +258,18 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
     [data]
   );
   const statusOptions = React.useMemo(
-    () => Array.from(new Set(data.map((d) => d.status).filter(Boolean))).sort(),
-    [data]
+    () =>
+      Array.from(
+        new Set(
+          data
+            .map((d) => getStatusName(d))
+            .filter((s) => !!s && s !== "UNKNOWN")
+        )
+      ).sort(),
+    [data, getStatusName]
   );
 
-  // Columns (inside component so we can call openEdit)
+  // Columns
   const columns: ColumnDef<DeviceRow>[] = [
     {
       id: "drag",
@@ -258,6 +309,7 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
       cell: ({ row }) => row.original.buildingName,
       enableHiding: true,
     },
+
     {
       accessorKey: "assetTag",
       header: "Asset Tag",
@@ -267,10 +319,16 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
         </Button>
       ),
     },
+
     {
       accessorKey: "name",
       header: "Name",
       cell: ({ row }) => <DeviceDrawer item={row.original} />,
+    },
+    {
+      accessorKey: "deviceId",
+      header: "รหัสครุภัณฑ์",
+      cell: ({ row }) => row.original.deviceId || "-",
     },
     {
       accessorKey: "type",
@@ -287,7 +345,14 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
     {
       accessorKey: "status",
       header: "สถานะ",
-      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      cell: ({ row }) => (
+        <Badge
+          variant="outline"
+          className="text-muted-foreground px-1.5 w-32 justify-center"
+        >
+          {row.original.status}
+        </Badge>
+      ),
     },
     {
       accessorKey: "ip",
@@ -318,17 +383,35 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
       header: () => (
         <div className="w-full text-right">ระยะเวลารับประกันคงเหลือ (วัน)</div>
       ),
-      cell: ({ row }) => (
-        <div className="text-right">
-          {daysUntil(row.original.warrantyEnd) ?? "N/A"}
-        </div>
-      ),
-      sortingFn: (a, b) => {
-        const da = daysUntil(a.original.warrantyEnd) ?? -999999;
-        const db = daysUntil(b.original.warrantyEnd) ?? -999999;
-        return da - db;
+      cell: ({ row }) => {
+        const d = daysUntil(row.original.warrantyEnd);
+        const cls =
+          d == null
+            ? "text-muted-foreground"
+            : d < 0
+              ? "text-destructive"
+              : d <= 30
+                ? "text-amber-600"
+                : "";
+
+        return (
+          <div className={`text-right ${cls}`}>
+            {formatDaysUntil(row.original.warrantyEnd, true)}
+            {/* true => แสดง "หมดประกัน (X วัน)" เมื่อเกินกำหนด */}
+          </div>
+        );
       },
-    },
+      // จัดเรียง: หมดประกัน(ค่าติดลบ) < กำลังจะหมด < N/A(ไปท้าย)
+      sortingFn: (a, b) => {
+        const da = daysUntil(a.original.warrantyEnd);
+        const db = daysUntil(b.original.warrantyEnd);
+        const na = da == null ? Number.POSITIVE_INFINITY : da;
+        const nb = db == null ? Number.POSITIVE_INFINITY : db;
+        return na - nb;
+      },
+    }
+
+    ,
     {
       id: "actions",
       cell: ({ row }) => (
@@ -347,21 +430,23 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
             <DropdownMenuItem
               onSelect={(e) => {
                 e.preventDefault();
-                openEdit(row.original); // << ใช้ dialog เดิมในโหมดแก้ไข
+                openEdit(row.original);
               }}
             >
               แก้ไข
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={(e) => {
-                e.preventDefault()
-                openDetail(row.original) // รายละเอียด = dialog ใหม่
+                e.preventDefault();
+                openDetail(row.original);
               }}
             >
               รายละเอียด
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive">ลบ</DropdownMenuItem>
+            <DropdownMenuItem /* variant="destructive" (ถ้า type ไม่รองรับ ลบ prop นี้) */>
+              ลบ
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ),
@@ -396,21 +481,17 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
     getFacetedUniqueValues: getFacetedUniqueValues(),
   });
 
-
-
-
-
-
-
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
-    if (active && over && active.id !== over.id) {
-      setData((data) => {
-        const oldIndex = dataIds.indexOf(active.id);
-        const newIndex = dataIds.indexOf(over.id);
-        return arrayMove(data, oldIndex, newIndex);
-      });
-    }
+    if (!active || !over || active.id === over.id) return;
+
+    setData((prev) => {
+      const ids = prev.map((d) => d.id); // ✅ คำนวณจาก state ล่าสุด
+      const oldIndex = ids.indexOf(active.id as number);
+      const newIndex = ids.indexOf(over.id as number);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
+    });
   }
 
   function openCreate() {
@@ -422,12 +503,12 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
     setDeviceDialogOpen(true);
   }
   function openDetail(row: DeviceRow) {
-    setDetailItem(row)
-    setDetailOpen(true)
+    setDetailItem(row);
+    setDetailOpen(true);
   }
+
   return (
     <>
-
       {showSuccess && (
         <Alert variant="success" className="mt-4 flex gap-2 items-start py-4">
           <div>
@@ -458,14 +539,14 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
           </TabsList>
 
           <div className="flex items-center gap-2">
-            {/* 🔎 Global search */}
+            {/* Global search */}
             <Input
               placeholder="ค้นหา (ชื่อ, AssetTag, IP, Vendor, Model, อาคาร, ห้อง, ประเภท, สถานะ)"
               value={globalFilter}
               onChange={(e) => setGlobalFilter(e.target.value)}
             />
 
-            {/* 🏢 อาคาร */}
+            {/* อาคาร */}
             <Select
               onValueChange={(v) =>
                 table
@@ -490,7 +571,7 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
               </SelectContent>
             </Select>
 
-            {/* 🧩 ประเภท */}
+            {/* ประเภท */}
             <Select
               onValueChange={(v) =>
                 table.getColumn("type")?.setFilterValue(v === "ALL" ? undefined : v)
@@ -510,7 +591,7 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
               </SelectContent>
             </Select>
 
-            {/* ✅ สถานะ */}
+            {/* สถานะ */}
             <Select
               onValueChange={(v) =>
                 table
@@ -567,7 +648,7 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Add / Edit dialog (ใช้ตัวเดียวกัน) */}
+            {/* Add / Edit dialog */}
             <Dialog open={deviceDialogOpen} onOpenChange={setDeviceDialogOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm" onClick={openCreate}>
@@ -588,36 +669,45 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
                       )
                     );
                   } else {
-                    // create row
+                    // create row — ตั้งค่า status เป็น string อย่างน้อย
                     setData((prev) => {
                       const nextId =
                         (prev?.length ? Math.max(...prev.map((d) => d.id)) : 0) +
                         1;
-                      return [
-                        { id: nextId, status: values.status ?? "ACTIVE", ...values },
-                        ...prev,
-                      ];
+
+                      const v: any = values;
+                      const statusString: string =
+                        typeof v.status === "string"
+                          ? v.status
+                          : v.statusName
+                            ? v.statusName
+                            : (v.statusId && (statusMap[v.statusId]?.name ?? "")) || "กำลังใช้งาน";
+
+                      const newItem = {
+                        id: nextId,
+                        ...values,
+                        status: statusString, // ✅ ให้เป็นชื่อสถานะไทย
+                      } as any as DeviceRow;
+
+                      return [newItem, ...prev];
                     });
                   }
                   setDeviceDialogOpen(false);
                   setEditing(null);
-                  setShowSuccess(true) // ✅ Show Alert
-                  setTimeout(() => setShowSuccess(false), 3000)
+                  setShowSuccess(true);
+                  setTimeout(() => setShowSuccess(false), 3000);
                 }}
-
               />
-
             </Dialog>
 
-
+            {/* Detail dialog */}
             <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
               {detailItem && (
                 <DataDeviceDialogContent
                   item={detailItem}
                   onEdit={(it) => {
-                    // จากหน้ารายละเอียดกด "แก้ไข" → เปิด dialog ฟอร์มเดิม
-                    setDetailOpen(false)
-                    openEdit(it as DeviceRow)
+                    setDetailOpen(false);
+                    openEdit(it as DeviceRow);
                   }}
                 />
               )}
@@ -663,12 +753,14 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
                     >
                       {table.getRowModel().rows.map((row) => (
                         <DraggableRow key={row.id.toString()} row={row} />
-
                       ))}
                     </SortableContext>
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={columns.length} className="h-24 text-center">
+                      <TableCell
+                        colSpan={table.getAllColumns().length}
+                        className="h-24 text-center"
+                      >
                         No results.
                       </TableCell>
                     </TableRow>
@@ -759,4 +851,3 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
     </>
   );
 }
-

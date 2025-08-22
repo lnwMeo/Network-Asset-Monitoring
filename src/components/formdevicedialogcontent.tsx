@@ -3,7 +3,8 @@
 import * as React from "react"
 import { useState, useRef } from "react"
 import {
-  DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose,
+  DialogContent, DialogHeader, DialogTitle,
+  DialogFooter, DialogClose,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,67 +16,57 @@ import ModelDialog from "./formmodeldialog"
 import DeviceTypeDialog from "./formdevicetypedialog"
 import BuildingDialog from "./frombuildingdialog"
 import RoomDialog from "./formroomdialog"
+import StatusDeviceDialog from "./formstatusdevicedialog"
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
-
 import { MoreHorizontal, Upload, X, Star, ImageIcon } from "lucide-react"
+import type { DeviceRow, DeviceImage } from "@/schemas/deviceSchema"
+// export type DeviceRow = {
+//   id: number
+//   assetTag: string
+//   name: string
+//   type: string
+//   deviceId: string
+//   status?: string
+//   vendor?: string | null
+//   model?: string | null
+//   ip?: string | null
+//   mac?: string | null
+//   buildingCode: string
+//   buildingName: string
+//   roomName: string
+//   roomId?: number | null
+//   purchaseDate?: string | null
+//   installDate?: string | null
+//   warrantyEnd?: string | null
+//   assetNumber?: string | null
+//   deviceTypeId?: number | null
 
-export type DeviceRow = {
-  id: number
-  assetTag: string
-  name: string
-  type: string
-  status?: string
-  vendor?: string | null
-  model?: string | null
-  ip?: string | null
-  mac?: string | null
-  buildingCode: string
-  buildingName: string
-  roomName: string
-  roomId?: number | null // เพิ่ม roomId
-  purchaseDate?: string | null
-  installDate?: string | null
-  warrantyEnd?: string | null
-  assetNumber?: string | null
-  deviceTypeId?: number | null
-}
+//   images?: {
+//     id: string | number
+//     url: string
+//     originalName: string
+//     isPrimary?: boolean
+//   }[]
+// }
 
 type FormValues = Omit<DeviceRow, "id">
 
-interface Model {
-  id: number
-  name: string
-}
+interface Model { id: number, name: string }
+interface Vendor { id: number, name: string }
+interface DeviceType { id: number, name: string }
+interface Room { id: number, name: string, buildingId: number }
+interface DeviceStatus { id: number, name: string }
 
-interface Vendor {
-  id: number
-  name: string
-}
-
-interface DeviceType {
-  id: number
-  name: string
-}
-
-interface Room {
-  id: number
-  name: string
-  buildingId: number
-}
-
-interface DeviceImage {
-  id?: number
-  file?: File
-  url: string
-  originalName: string
-  isPrimary: boolean
-  isNew?: boolean
-}
+// interface DeviceImage {
+//   id?: number
+//   file?: File
+//   url: string
+//   originalName: string
+//   isPrimary: boolean
+//   isNew?: boolean
+// }
 
 export default function FormDeviceDialogContent({
   mode = "create",
@@ -90,7 +81,9 @@ export default function FormDeviceDialogContent({
     assetTag: "",
     name: "",
     type: "",
-    status: "ACTIVE",
+    deviceId: "",
+    statusId: null,
+    statusName: "",
     vendor: "",
     model: "",
     ip: "",
@@ -98,7 +91,7 @@ export default function FormDeviceDialogContent({
     buildingCode: "",
     buildingName: "",
     roomName: "",
-    roomId: null, // เพิ่มค่าเริ่มต้น
+    roomId: null,
     purchaseDate: "",
     installDate: "",
     warrantyEnd: "",
@@ -107,7 +100,7 @@ export default function FormDeviceDialogContent({
     ...initial,
   })
 
-  // =============== Image Upload ===============
+  // === IMAGE SECTION ===
   const [images, setImages] = useState<DeviceImage[]>([])
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -120,118 +113,134 @@ export default function FormDeviceDialogContent({
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  // =============== Image Functions ===============
-  const handleFileSelect = (files: FileList | null) => {
-    if (!files || files.length === 0) return
-
-    const newImages: DeviceImage[] = []
-
-    Array.from(files).forEach((file, index) => {
-      if (file.type.startsWith('image/')) {
-        const url = URL.createObjectURL(file)
-        newImages.push({
-          file,
-          url,
-          originalName: file.name,
-          isPrimary: images.length === 0 && index === 0,
-          isNew: true
-        })
-      }
+  async function saveDevice() {
+    if (mode === "create") {
+      const res = await fetch("/api/devices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      })
+      if (!res.ok) throw new Error("Create device error")
+      const device = await res.json()
+      return device.id
+    }
+    const res = await fetch(`/api/devices/${(initial as any).id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
     })
+    if (!res.ok) throw new Error("Update device error")
+    const device = await res.json()
+    return device.id
+  }
 
-    setImages(prev => [...prev, ...newImages])
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
+  async function uploadImages(devId: number) {
+    const formData = new FormData()
+    images.filter(img => img.isNew).forEach(img => {
+      formData.append("images", img.file!)
+    })
+    if (formData.has("images")) {
+      await fetch(`/api/devices/${devId}/images`, {
+        method: "POST",
+        body: formData,
+      })
     }
   }
 
-  const removeImage = (index: number) => {
-    setImages(prev => {
-      const newImages = prev.filter((_, i) => i !== index)
-
-      if (prev[index].isPrimary && newImages.length > 0) {
-        newImages[0].isPrimary = true
-      }
-
-      if (prev[index].url.startsWith('blob:')) {
-        URL.revokeObjectURL(prev[index].url)
-      }
-
-      return newImages
-    })
-  }
-
-  const setPrimaryImage = (index: number) => {
-    setImages(prev => prev.map((img, i) => ({
-      ...img,
-      isPrimary: i === index
-    })))
-  }
-
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.assetTag || !form.name || !form.type || !form.buildingName || !form.roomName) {
       alert("กรุณากรอกข้อมูลที่จำเป็นให้ครบ")
       return
     }
-    onSubmit(form, images)
+    try {
+      setUploading(true)
+      const id = await saveDevice()
+      await uploadImages(id)
+      onSubmit(form, images)
+      alert("บันทึกสำเร็จ")
+    } catch (err) {
+      console.error(err)
+      alert("เกิดข้อผิดพลาด")
+    } finally {
+      setUploading(false)
+    }
   }
 
-  // =============== Vendor ===========
-  const [vendors, setVendors] = React.useState<Vendor[]>([])
+  const handleFileSelect = (files: FileList | null) => {
+    if (!files) return
+    const arr: DeviceImage[] = []
+    Array.from(files).forEach((file, idx) => {
+      if (file.type.startsWith("image/")) {
+        const url = URL.createObjectURL(file)
+        arr.push({ file, url, originalName: file.name, isPrimary: images.length === 0 && idx === 0, isNew: true })
+      }
+    })
+    setImages(prev => [...prev, ...arr])
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const removeImage = (idx: number) => {
+    setImages(prev => {
+      const next = prev.filter((_, i) => i !== idx)
+      if (prev[idx].isPrimary && next.length > 0) next[0].isPrimary = true
+      if (prev[idx].url.startsWith("blob:")) URL.revokeObjectURL(prev[idx].url)
+      return next
+    })
+  }
+
+  const setPrimaryImage = (i: number) => {
+    setImages(p => p.map((it, idx) => ({ ...it, isPrimary: idx === i })))
+  }
+
+  // ----- DeviceStatus -----
+  const [devicestatuss, setDevicestatuss] = useState<DeviceStatus[]>([])
+  const [addDeviceStatusOpen, setAddDeviceStatusOpen] = useState(false)
+  const [editDeviceStatusOpen, setEditDeviceStatusOpen] = useState(false)
+  const [editingDeviceStatus, setEditingDeviceStatus] = useState<DeviceStatus | null>(null)
+
+  React.useEffect(() => {
+    fetch("/api/devicestatus").then(r => r.json()).then(setDevicestatuss)
+  }, [])
+
+
+
+  // ----- Vendors/Models (เหมือนเดิม) -----
+  const [vendors, setVendors] = useState<Vendor[]>([])
   const [addVendorOpen, setAddVendorOpen] = useState(false)
   const [editVendorOpen, setEditVendorOpen] = useState(false)
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null)
 
   React.useEffect(() => {
-    fetch("/api/vendors")
-      .then(r => r.json())
-      .then(setVendors)
-      .catch(err => console.error("Error fetching vendors:", err))
+    fetch("/api/vendors").then(r => r.json()).then(setVendors)
   }, [])
 
-  // =============== DeviceType =============
-  const [devicetypes, setDevicetypes] = React.useState<DeviceType[]>([])
+  const [models, setModels] = useState<Model[]>([])
+  const [addModelOpen, setAddModelOpen] = useState(false)
+  const [editModelOpen, setEditModelOpen] = useState(false)
+  const [editingModel, setEditingModel] = useState<Model | null>(null)
+
+  React.useEffect(() => {
+    if (!form.vendor) { setModels([]); update("model", ""); return }
+    const v = vendors.find(v => v.name === form.vendor)
+    if (!v) return
+    fetch(`/api/models?vendorId=${v.id}`).then(r => r.json()).then((res) => {
+      setModels(res)
+      if (form.model && !res.some((m: Model) => m.name === form.model)) update("model", "")
+    })
+  }, [form.vendor, vendors])
+
+  // ----- DeviceType -----
+  const [devicetypes, setDevicetypes] = useState<DeviceType[]>([])
   const [addDevicetypeOpen, setAddDevicetypeOpen] = useState(false)
   const [editDevicetypeOpen, setEditDevicetypeOpen] = useState(false)
   const [editingDevicetype, setEditingDevicetype] = useState<DeviceType | null>(null)
 
   React.useEffect(() => {
-    fetch("/api/devicetypes")
-      .then(r => r.json())
-      .then(setDevicetypes)
-      .catch(err => console.error("Error fetching devicetypes:", err))
+    fetch("/api/devicetypes").then(r => r.json()).then(setDevicetypes)
   }, [])
 
-  // =============== Model =============
-  const [models, setModels] = React.useState<Model[]>([])
-  const [addModelOpen, setAddModelOpen] = React.useState(false)
-  const [editModelOpen, setEditModelOpen] = React.useState(false)
-  const [editingModel, setEditingModel] = React.useState<Model | null>(null)
-
-  React.useEffect(() => {
-    if (!form.vendor) {
-      setModels([])
-      update("model", "")
-      return
-    }
-
-    const selectedVendor = vendors.find(v => v.name === form.vendor)
-    if (selectedVendor) {
-      fetch(`/api/models?vendorId=${selectedVendor.id}`)
-        .then(r => r.json())
-        .then((res) => {
-          setModels(res)
-          if (form.model && !res.some((m: Model) => m.name === form.model)) {
-            update("model", "")
-          }
-        })
-        .catch(err => console.error("Error fetching models:", err))
-    }
-  }, [form.vendor, vendors])
-
-  // =============== Buildings & Rooms =============
+  // ----- Buildings/Rooms -----
   const [buildings, setBuildings] = useState<{ id: number, code: string, name: string }[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
   const [addBuildingOpen, setAddBuildingOpen] = useState(false)
@@ -242,56 +251,39 @@ export default function FormDeviceDialogContent({
   const [editingRoom, setEditingRoom] = useState<Room | null>(null)
 
   React.useEffect(() => {
-    fetch("/api/buildings")
-      .then(r => r.json())
-      .then(setBuildings)
+    fetch("/api/buildings").then(r => r.json()).then(setBuildings)
   }, [])
 
-  // Fetch rooms when building changes
   React.useEffect(() => {
-    if (!form.buildingCode) {
-      setRooms([])
-      update("roomName", "")
-      update("roomId", null)
-      return
-    }
-
-    const selectedBuilding = buildings.find(b => b.code === form.buildingCode)
-    if (selectedBuilding) {
-      fetch(`/api/rooms?buildingId=${selectedBuilding.id}`)
-        .then(r => r.json())
-        .then((res) => {
-          setRooms(res)
-          if (form.roomName && !res.some((r: Room) => r.name === form.roomName)) {
-            update("roomName", "")
-            update("roomId", null)
-          }
-        })
-        .catch(err => console.error("Error fetching rooms:", err))
-    }
+    if (!form.buildingCode) { setRooms([]); update("roomName", ""); update("roomId", null); return }
+    const b = buildings.find(bb => bb.code === form.buildingCode)
+    if (!b) return
+    fetch(`/api/rooms?buildingId=${b.id}`).then(r => r.json()).then(res => {
+      setRooms(res)
+      if (form.roomName && !res.some((rr: Room) => rr.name === form.roomName)) {
+        update("roomName", ""); update("roomId", null)
+      }
+    })
   }, [form.buildingCode, buildings])
 
   return (
     <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-      <DialogHeader>
-        <DialogTitle>{mode === "edit" ? "แก้ไขอุปกรณ์" : "เพิ่มอุปกรณ์ใหม่"}</DialogTitle>
-      </DialogHeader>
-
+      <DialogHeader><DialogTitle>{mode === "edit" ? "แก้ไขอุปกรณ์" : "เพิ่มอุปกรณ์ใหม่"}</DialogTitle></DialogHeader>
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Information */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="grid gap-2">
-            <Label htmlFor="assetTag">Asset Tag *</Label>
+            <Label htmlFor="assetTag">Asset Tag<p className="text-red-600">*</p></Label>
             <Input id="assetTag" value={form.assetTag} onChange={(e) => update("assetTag", e.target.value)} required />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="name">ชื่ออุปกรณ์ *</Label>
+            <Label htmlFor="name">ชื่ออุปกรณ์<p className="text-red-600">*</p></Label>
             <Input id="name" value={form.name} onChange={(e) => update("name", e.target.value)} required />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="devicetype">ประเภท *</Label>
+            <Label htmlFor="devicetype">ประเภท<p className="text-red-600">*</p></Label>
             <div className="flex gap-2">
               <Select
                 value={form.deviceTypeId?.toString() ?? ""}
@@ -361,14 +353,86 @@ export default function FormDeviceDialogContent({
             </div>
           </div>
 
+
           <div className="grid gap-2">
-            <Label htmlFor="assetNumber">รหัสครุภัณฑ์</Label>
-            <Input id="assetNumber" value={form.assetNumber ?? ""} onChange={(e) => update("assetNumber", e.target.value)} />
+            <Label htmlFor="devicestatus">สถานะ <p className="text-red-600">*</p></Label>
+            <div className="flex gap-2">
+              <Select
+                value={form.statusId?.toString() ?? ""}
+                onValueChange={(value) => {
+                  if (value === "__add__") {
+                    setAddDeviceStatusOpen(true)
+                  } else {
+                    const deviceStatus = devicestatuss.find(d => d.id.toString() === value)
+                    if (deviceStatus) {
+                      update("statusId", deviceStatus.id)
+                      update("statusName", deviceStatus.name)
+                    }
+                  }
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="เลือกสถานะ" /></SelectTrigger>
+                <SelectContent>
+                  {devicestatuss.map((d) => (
+                    <SelectItem key={d.id} value={d.id.toString()}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="__add__" className="text-blue-500">
+                    + เพิ่มสถานะใหม่...
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              {form.statusId && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        const selectedDeviceStatus = devicestatuss.find(d => d.id === form.statusId)
+                        if (selectedDeviceStatus) {
+                          setEditingDeviceStatus(selectedDeviceStatus)
+                          setEditDeviceStatusOpen(true)
+                        }
+                      }}
+                    >
+                      แก้ไข
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="text-red-500"
+                      onSelect={async () => {
+                        const selectedDeviceStatus = devicestatuss.find(d => d.id === form.statusId)
+                        if (selectedDeviceStatus && confirm("ลบสถานะนี้?")) {
+                          try {
+                            await fetch(`/api/devicestatus/${selectedDeviceStatus.id}`, { method: "DELETE" })
+                            setDevicestatuss(prev => prev.filter(it => it.id !== selectedDeviceStatus.id))
+                            update("statusId", null)
+                            update("statusName", "")
+                          } catch (err) {
+                            console.error("Error deleting device status:", err)
+                            alert("เกิดข้อผิดพลาดในการลบสถานะ")
+                          }
+                        }
+                      }}
+                    >
+                      ลบ
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="deviceId">รหัสครุภัณฑ์</Label>
+            <Input id="deviceId" value={form.deviceId ?? ""} onChange={(e) => update("deviceId", e.target.value)} />
           </div>
 
           {/* Vendor Section */}
           <div className="grid gap-2">
-            <Label htmlFor="vendor">Vendor</Label>
+            <Label htmlFor="vendor">ยี่ห้อ<p className="text-red-600">*</p></Label>
             <div className="flex gap-2">
               <Select
                 value={form.vendor ?? ""}
@@ -431,7 +495,7 @@ export default function FormDeviceDialogContent({
 
           {/* Model Section */}
           <div className="grid gap-2">
-            <Label htmlFor="model">Model</Label>
+            <Label htmlFor="model">รุ่น<p className="text-red-600">*</p></Label>
             <div className="flex gap-2">
               <Select
                 value={form.model ?? ""}
@@ -513,7 +577,7 @@ export default function FormDeviceDialogContent({
 
           {/* Building Section */}
           <div className="grid gap-2">
-            <Label>อาคาร *</Label>
+            <Label>อาคาร<p className="text-red-600">*</p></Label>
             <div className="flex gap-2">
               <Select
                 value={form.buildingCode}
@@ -565,7 +629,7 @@ export default function FormDeviceDialogContent({
 
           {/* Room Section */}
           <div className="grid gap-2">
-            <Label htmlFor="room">ห้อง *</Label>
+            <Label htmlFor="room">ห้อง<p className="text-red-600">*</p></Label>
             <div className="flex gap-2">
               <Select
                 value={form.roomId?.toString() ?? ""}
@@ -641,17 +705,17 @@ export default function FormDeviceDialogContent({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="purchaseDate">วันที่ซื้อ</Label>
+            <Label htmlFor="purchaseDate">วันที่ซื้อ<p className="text-red-600">*</p></Label>
             <Input id="purchaseDate" type="date" value={form.purchaseDate ?? ""} onChange={(e) => update("purchaseDate", e.target.value)} />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="installDate">วันที่ติดตั้ง</Label>
+            <Label htmlFor="installDate">วันที่ติดตั้ง<p className="text-red-600">*</p></Label>
             <Input id="installDate" type="date" value={form.installDate ?? ""} onChange={(e) => update("installDate", e.target.value)} />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="warrantyEnd">สิ้นสุดประกัน</Label>
+            <Label htmlFor="warrantyEnd">สิ้นสุดประกัน<p className="text-red-600">*</p></Label>
             <Input id="warrantyEnd" type="date" value={form.warrantyEnd ?? ""} onChange={(e) => update("warrantyEnd", e.target.value)} />
           </div>
         </div>
@@ -960,7 +1024,7 @@ export default function FormDeviceDialogContent({
           onSave={async (code, name) => {
             try {
               const res = await fetch(`/api/buildings/${editingBuilding.id}`, {
-                method: "PUT", 
+                method: "PUT",
                 body: JSON.stringify({ code, name }),
                 headers: { "Content-Type": "application/json" }
               })
@@ -1037,6 +1101,58 @@ export default function FormDeviceDialogContent({
             } catch (err) {
               console.error("Error updating room:", err)
               alert("เกิดข้อผิดพลาดในการแก้ไขห้อง")
+            }
+          }}
+        />
+      )}
+
+
+        <StatusDeviceDialog
+        open={addDeviceStatusOpen}
+        setOpen={setAddDeviceStatusOpen}
+        title="เพิ่มสถานะใหม่"
+        initialName=""
+        onSave={async (name) => {
+          try {
+            const res = await fetch("/api/devicestatus", {
+              method: "POST",
+              body: JSON.stringify({ name }),
+              headers: { "Content-Type": "application/json" },
+            })
+            if (!res.ok) throw new Error("Failed to create device status")
+            const d = await res.json()
+            setDevicestatuss(prev => [...prev, d])
+            update("statusId", d.id)
+            update("statusName", d.name)
+          } catch (err) {
+            console.error("Error creating device status:", err)
+            alert("เกิดข้อผิดพลาดในการสร้างสถานะ")
+          }
+        }}
+      />
+
+      {editingDeviceStatus && (
+        <StatusDeviceDialog
+          open={editDeviceStatusOpen}
+          setOpen={(open) => {
+            setEditDeviceStatusOpen(open)
+            if (!open) setEditingDeviceStatus(null)
+          }}
+          title="แก้ไขสถานะ"
+          initialName={editingDeviceStatus.name}
+          onSave={async (name) => {
+            try {
+              const res = await fetch(`/api/devicestatus/${editingDeviceStatus.id}`, {
+                method: "PUT",
+                body: JSON.stringify({ name }),
+                headers: { "Content-Type": "application/json" },
+              })
+              if (!res.ok) throw new Error("Failed to update device status")
+              setDevicestatuss(prev => prev.map((it) => it.id === editingDeviceStatus.id ? { ...it, name } : it))
+              update("statusName", name)
+            } catch (err) {
+              console.error("Error updating device status:", err)
+              alert("เกิดข้อผิดพลาดในการแก้ไขสถานะ")
             }
           }}
         />

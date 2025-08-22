@@ -9,63 +9,48 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
+import { daysBetween, daysUntil, ageLabel, formatDaysUntil } from "@/utils/agedevice";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import {
-  IconCircleCheckFilled,
-  IconAlertTriangle,
-  IconTool,
-  IconArchive,
-  IconQuestionMark,
-} from "@tabler/icons-react";
+
 
 // 👉 ใช้ type เดียวกับฟอร์ม add/edit
-import type { DeviceRow } from "@/components/formdevicedialogcontent";
+import type { DeviceRow } from "@/schemas/deviceSchema"
+function formatDate(dateLike?: string | null) {
+  if (!dateLike) return "-";
+  const d = new Date(dateLike);
+  if (isNaN(d.getTime())) return "-";
+  // ถ้าอยากโชว์เวลาเพิ่ม ใส่ hour/minute เข้าไปได้
+  return d.toLocaleDateString("th-TH", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
 
 /* ---------- small utils ---------- */
-function daysBetween(from?: string | null) {
-  if (!from) return null;
-  const d = new Date(from);
-  if (isNaN(d.getTime())) return null;
-  const diff = Date.now() - d.getTime();
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
-}
-function daysUntil(to?: string | null) {
-  if (!to) return null;
-  const d = new Date(to);
-  if (isNaN(d.getTime())) return null;
-  const diff = d.getTime() - Date.now();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-function ageLabel(days: number | null) {
-  if (days === null) return "N/A";
-  const y = Math.floor(days / 365);
-  const m = Math.floor((days % 365) / 30);
-  return y > 0 ? `${y}y ${m}m` : `${m}m`;
-}
+// function daysBetween(from?: string | null) {
+//   if (!from) return null;
+//   const d = new Date(from);
+//   if (isNaN(d.getTime())) return null;
+//   const diff = Date.now() - d.getTime();
+//   return Math.floor(diff / (1000 * 60 * 60 * 24));
+// }
+// function daysUntil(to?: string | null) {
+//   if (!to) return null;
+//   const d = new Date(to);
+//   if (isNaN(d.getTime())) return null;
+//   const diff = d.getTime() - Date.now();
+//   return Math.ceil(diff / (1000 * 60 * 60 * 24));
+// }
+// function ageLabel(days: number | null) {
+//   if (days === null) return "N/A";
+//   const y = Math.floor(days / 365);
+//   const m = Math.floor((days % 365) / 30);
+//   return y > 0 ? `${y}y ${m}m` : `${m}m`;
+// }
 
-/* ---------- status badge ---------- */
-function StatusBadge({ status }: { status?: string }) {
-  const norm = status?.toUpperCase?.() || "UNKNOWN";
-  const map: Record<
-    string,
-    { label: string; icon: React.ReactNode; variant: "default" | "secondary" | "outline" }
-  > = {
-    ACTIVE: { label: "ACTIVE", icon: <IconCircleCheckFilled className="fill-green-500" />, variant: "default" },
-    WARNING: { label: "WARNING", icon: <IconAlertTriangle className="text-amber-500" />, variant: "secondary" },
-    REPAIR: { label: "REPAIR", icon: <IconTool />, variant: "outline" },
-    RETIRED: { label: "RETIRED", icon: <IconArchive />, variant: "outline" },
-    UNKNOWN: { label: "UNKNOWN", icon: <IconQuestionMark />, variant: "outline" },
-  };
-  const cfg = map[norm] ?? map.UNKNOWN;
-  return (
-    <Badge variant={cfg.variant} className="gap-1 px-1.5">
-      {cfg.icon}
-      {cfg.label}
-    </Badge>
-  );
-}
+
 
 /* ---------- key/value row ---------- */
 function KV({ label, children }: { label: string; children: React.ReactNode }) {
@@ -89,6 +74,11 @@ export default function DataDeviceDialogContent({
   const ageDays = daysBetween(item.purchaseDate);
   const warrantyDays = daysUntil(item.warrantyEnd);
 
+
+  const leftDays = daysUntil(item.warrantyEnd);                 // ตัวเลข (อาจลบ/บวก หรือ null)
+  const warrantyLabel = formatDaysUntil(item.warrantyEnd, true); // "หมดประกัน (5 วัน)" / "N/A" / "12"
+  const expired = typeof leftDays === "number" && leftDays < 0;  // ใช้แต่งสี
+
   return (
     <DialogContent className="max-w-3xl">
       <DialogHeader className="gap-1">
@@ -101,12 +91,13 @@ export default function DataDeviceDialogContent({
       {/* ข้อมูลหลัก */}
       <div className="grid grid-cols-1 gap-4 px-1 md:grid-cols-2">
         <KV label="สถานะ">
-          <StatusBadge status={item.status} />
+          {item.status}
         </KV>
-        <KV label="รหัสครุภัณฑ์">{item.assetNumber || "-"}</KV>
+        <KV label="ชื่อ">{item.name || "-"}</KV>
+        <KV label="รหัสครุภัณฑ์">{item.deviceId || "-"}</KV>
 
-        <KV label="Vendor">{item.vendor || "-"}</KV>
-        <KV label="Model">{item.model || "-"}</KV>
+        <KV label="ยี่ห้อ">{item.vendor || "-"}</KV>
+        <KV label="รุ่น">{item.model || "-"}</KV>
 
         <KV label="IP Address">{item.ip || "-"}</KV>
         <KV label="MAC">{item.mac || "-"}</KV>
@@ -116,14 +107,38 @@ export default function DataDeviceDialogContent({
           {item.buildingName} / {item.roomName}
         </KV>
 
-        <KV label="วันที่ซื้อ">{item.purchaseDate || "-"}</KV>
-        <KV label="วันที่ติดตั้ง">{item.installDate || "-"}</KV>
-        <KV label="สิ้นสุดประกัน">{item.warrantyEnd || "-"}</KV>
+        <KV label="วันที่ซื้อ">{formatDate(item.purchaseDate || "-")}</KV>
+        <KV label="วันที่ติดตั้ง">{formatDate(item.installDate || "-")}</KV>
+        <KV label="สิ้นสุดประกัน">{formatDate(item.warrantyEnd || "-")}</KV>
 
         <KV label="อายุอุปกรณ์">{ageLabel(ageDays)}</KV>
-        <KV label="วันคงเหลือประกัน">{warrantyDays ?? "N/A"} วัน</KV>
-      </div>
+        <KV label="วันคงเหลือประกัน"> <div className={expired ? "text-destructive" : ""}>
+          {warrantyLabel}
+        </div></KV>
 
+
+      </div>
+      {item.images?.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="font-medium">รูปภาพ</h4>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+            {item.images.map((img) => (
+              <div key={img.id} className="relative">
+                <img
+                  src={img.url}
+                  alt={img.originalName}
+                  className="w-full h-auto rounded border"
+                />
+                {img.isPrimary && (
+                  <span className="absolute top-1 left-1 text-xs bg-yellow-500 text-white px-1 rounded">
+                    หลัก
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <Separator className="my-2" />
 
       <DialogFooter className="gap-2">

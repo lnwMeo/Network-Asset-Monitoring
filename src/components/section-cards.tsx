@@ -55,13 +55,13 @@ export function SectionCards({ devices }: { devices: DeviceRow[] }) {
   }).length
 
   // ACTIVE
-  const activeCount = devices.filter((d) => d.status === "ACTIVE").length
+  const activeCount = devices.filter((d) => d.status === "กำลังใช้งาน").length
   const activeRatio = total ? Math.round((activeCount / total) * 100) : 0
   const activeUp = activeRatio >= 70 // เกณฑ์ตัวอย่าง: ≥70% ถือว่าดี
 
   // Needs Attention = WARNING + REPAIR
   const attentionCount = devices.filter(
-    (d) => d.status === "WARNING" || d.status === "REPAIR"
+    (d) => d.status === "WARNING" || d.status === "กำลังแก้ไข"
   ).length
   const attentionRatio = total ? Math.round((attentionCount / total) * 100) : 0
   const attentionGood = attentionRatio <= 10 // ≤10% ถือว่าดี
@@ -69,7 +69,7 @@ export function SectionCards({ devices }: { devices: DeviceRow[] }) {
   // Warranty expiring ≤ 90 วัน
   const expiring90 = devices.filter((d) => {
     const left = daysUntil(d.warrantyEnd)
-    return left !== null && left <= 90
+    return typeof left === "number" && left >= 0 && left <= 90;
   }).length
   const expiringUp = expiring90 <= Math.max(1, Math.floor(total * 0.05)) // ถ้าน้อยกว่า ~5% ถือว่าดี
 
