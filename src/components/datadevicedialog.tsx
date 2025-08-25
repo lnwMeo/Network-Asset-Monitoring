@@ -72,7 +72,7 @@ export default function DataDeviceDialogContent({
   onEdit?: (item: DeviceRow) => void;
 }) {
   const ageDays = daysBetween(item.purchaseDate);
-  const warrantyDays = daysUntil(item.warrantyEnd);
+  // const warrantyDays = daysUntil(item.warrantyEnd);
 
 
   const leftDays = daysUntil(item.warrantyEnd);                 // ตัวเลข (อาจลบ/บวก หรือ null)

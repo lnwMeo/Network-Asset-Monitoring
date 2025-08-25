@@ -52,6 +52,7 @@ import {
 } from "@tanstack/react-table";
 
 import type { DeviceRow } from "@/schemas/deviceSchema";
+import { downloadDeviceQRAsPDF, downloadDevicesQRBatchPDF } from "@/utils/qrpdf";
 
 import { DeviceDrawer } from "@/components/DeviceDrawer";
 // import { StatusBadge } from "@/utils/statusbadge";
@@ -88,7 +89,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import { daysBetween, daysUntil, ageLabel,formatDaysUntil } from "@/utils/agedevice";
+import { daysBetween, daysUntil, ageLabel, formatDaysUntil } from "@/utils/agedevice";
 
 
 // =====================
@@ -443,6 +444,15 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
             >
               รายละเอียด
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault();
+                // ใส่ชื่อหน่วยงานที่อยากขึ้นบนป้ายได้ที่นี่
+                downloadDeviceQRAsPDF(row.original, { unitName: "สำนักคอมพิวเตอร์" });
+              }}
+            >
+              QRcode
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem /* variant="destructive" (ถ้า type ไม่รองรับ ลบ prop นี้) */>
               ลบ
@@ -657,6 +667,7 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
                 </Button>
               </DialogTrigger>
 
+
               <FormDeviceDialogContent
                 mode={editing ? "edit" : "create"}
                 initial={editing ?? undefined}
@@ -699,6 +710,17 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
                 }}
               />
             </Dialog>
+
+            <Button variant="outline" size="sm"
+              onClick={() =>
+                downloadDevicesQRBatchPDF(
+                  table.getSelectedRowModel().rows.map(r => r.original),
+                  { unitName: "สำนักคอมพิวเตอร์", cols: 2, rows: 4, page: "A4", orientation: "portrait" }
+                )
+              }
+            >
+              พิมพ์ QR (เฉพาะที่เลือก)
+            </Button>
 
             {/* Detail dialog */}
             <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
