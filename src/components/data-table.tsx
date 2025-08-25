@@ -657,7 +657,16 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
                   ))}
               </DropdownMenuContent>
             </DropdownMenu>
-
+            <Button variant="outline" size="sm"
+              onClick={() =>
+                downloadDevicesQRBatchPDF(
+                  table.getSelectedRowModel().rows.map(r => r.original),
+                  { unitName: "สำนักคอมพิวเตอร์", cols: 2, rows: 4, page: "A4", orientation: "portrait" }
+                )
+              }
+            >
+              พิมพ์ QR (เฉพาะที่เลือก)
+            </Button>
             {/* Add / Edit dialog */}
             <Dialog open={deviceDialogOpen} onOpenChange={setDeviceDialogOpen}>
               <DialogTrigger asChild>
@@ -711,16 +720,7 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
               />
             </Dialog>
 
-            <Button variant="outline" size="sm"
-              onClick={() =>
-                downloadDevicesQRBatchPDF(
-                  table.getSelectedRowModel().rows.map(r => r.original),
-                  { unitName: "สำนักคอมพิวเตอร์", cols: 2, rows: 4, page: "A4", orientation: "portrait" }
-                )
-              }
-            >
-              พิมพ์ QR (เฉพาะที่เลือก)
-            </Button>
+
 
             {/* Detail dialog */}
             <Dialog open={detailOpen} onOpenChange={setDetailOpen}>

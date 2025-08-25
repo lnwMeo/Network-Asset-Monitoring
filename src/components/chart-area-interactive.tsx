@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Label } from "@/components/ui/label"
 
 // โครงสร้างข้อมูลของอุปกรณ์ (DeviceRow)
 export type DeviceRow = {
@@ -33,7 +34,7 @@ export type DeviceRow = {
   assetTag: string
   name: string
   type: string
-  status: "ACTIVE" | "WARNING" | "REPAIR" | "RETIRED" | "UNKNOWN" | string
+  status: string
   vendor?: string | null
   model?: string | null
   ip?: string | null
@@ -54,13 +55,23 @@ function daysBetween(from?: string | null) {
   const diff = Date.now() - d.getTime()
   return Math.floor(diff / (1000 * 60 * 60 * 24))
 }
-
+function isActive(dev: DeviceRow) {
+  const s = (dev.status ?? "").toString().trim().toUpperCase()
+  return (
+    s === "ACTIVE" ||
+    s === "ใช้งาน" ||
+    s === "กำลังใช้งาน" ||
+    s === "IN_USE" ||
+    s === "INUSE"
+  )
+}
 // โครงสร้างข้อมูลจุด (Point) สำหรับกราฟ
 type AgePoint = {
   bucket: string // ป้ายช่วง เช่น "0–5m"
   all: number    // จำนวนอุปกรณ์ทั้งหมด
   active: number // จำนวนอุปกรณ์ที่ใช้งานอยู่
 }
+
 
 // การตั้งค่ากราฟ (ChartConfig)
 const chartConfig = {
@@ -95,7 +106,7 @@ function buildAgeSeries(
       months >= maxMonths ? buckets.length - 1 : Math.floor(months / stepMonths)
 
     buckets[idx].all += 1
-    if (d.status === "ACTIVE") buckets[idx].active += 1
+    if (isActive(d)) buckets[idx].active += 1
   }
   return buckets
 }
@@ -103,7 +114,7 @@ function buildAgeSeries(
 // คอมโพเนนต์กราฟพื้นที่ (Area Chart) แบบโต้ตอบได้
 export function ChartAreaInteractive({
   devices,
-  title = "การกระจายอายุของอุปกรณ์",
+  title = "จำนวนและการกระจายอายุของอุปกรณ์",
 }: {
   devices: DeviceRow[]
   title?: string
@@ -111,7 +122,13 @@ export function ChartAreaInteractive({
   const isMobile = useIsMobile()
   // ค่าเริ่มต้นของช่วงเวลา (5 ปี = 60 เดือน / 3 ปี = 36 เดือน / 1 ปี = 12 เดือน)
   const [range, setRange] = React.useState<"5y" | "3y" | "1y">("5y")
-
+  // ใหม่: ตัวกรองประเภท
+  const typeOptions = React.useMemo(
+    () =>
+      Array.from(new Set(devices.map((d) => d.type).filter(Boolean))).sort(),
+    [devices]
+  )
+  const [typeFilter, setTypeFilter] = React.useState<string>("ALL")
   // ถ้าเป็นมือถือให้ใช้ช่วง 3 ปี
   React.useEffect(() => {
     if (isMobile) setRange("3y")
@@ -124,12 +141,19 @@ export function ChartAreaInteractive({
     return { maxMonths: 60, stepMonths: 6, subtitle: "ย้อนหลัง 5 ปี" }
   }, [range])
 
-  // เตรียมข้อมูลสำหรับกราฟ
-  const data = React.useMemo(
-    () => buildAgeSeries(devices, maxMonths, stepMonths),
-    [devices, maxMonths, stepMonths]
+  const filtered = React.useMemo(
+    () => (typeFilter === "ALL" ? devices : devices.filter((d) => d.type === typeFilter)),
+    [devices, typeFilter]
   )
 
+  const data = React.useMemo(
+    () => buildAgeSeries(filtered, maxMonths, stepMonths),
+    [filtered, maxMonths, stepMonths]
+  )
+
+  // legend label + ตัวเลขสรุป
+  const totalCount = filtered.length
+  const activeCount = filtered.filter(isActive).length
   return (
     <Card className="@container/card">
       <CardHeader>
@@ -139,18 +163,37 @@ export function ChartAreaInteractive({
           <span className="@[540px]/card:hidden">{subtitle}</span>
         </CardDescription>
         <CardAction>
-          {/* ปุ่มเลือกช่วงเวลาแบบ Toggle */}
-          <ToggleGroup
-            type="single"
-            value={range}
-            onValueChange={(v) => v && setRange(v as typeof range)}
-            variant="outline"
-            className="hidden *:data-[slot=toggle-group-item]:!px-4 @[767px]/card:flex"
-          >
-            <ToggleGroupItem value="5y">5 ปี</ToggleGroupItem>
-            <ToggleGroupItem value="3y">3 ปี</ToggleGroupItem>
-            <ToggleGroupItem value="1y">1 ปี</ToggleGroupItem>
-          </ToggleGroup>
+          <div className="flex gap-2">
+
+            <div className="hidden items-center gap-2 @[767px]/card:flex">
+              <Label htmlFor="type-filter" className="text-sm">ประเภท</Label>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger id="type-filter" className="w-44" size="sm" aria-label="เลือกประเภท">
+                  <SelectValue placeholder="ทุกประเภท" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  <SelectItem value="ALL" className="rounded-lg">ทุกประเภท</SelectItem>
+                  {typeOptions.map((t) => (
+                    <SelectItem key={t} value={t} className="rounded-lg">
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {/* ปุ่มเลือกช่วงเวลาแบบ Toggle */}
+            <ToggleGroup
+              type="single"
+              value={range}
+              onValueChange={(v) => v && setRange(v as typeof range)}
+              variant="outline"
+              className="hidden *:data-[slot=toggle-group-item]:!px-4 @[767px]/card:flex"
+            >
+              <ToggleGroupItem value="5y">5 ปี</ToggleGroupItem>
+              <ToggleGroupItem value="3y">3 ปี</ToggleGroupItem>
+              <ToggleGroupItem value="1y">1 ปี</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
 
           {/* ตัวเลือกช่วงเวลาแบบ Select (ใช้ในมือถือ) */}
           <Select value={range} onValueChange={(v) => setRange(v as typeof range)}>
@@ -172,7 +215,23 @@ export function ChartAreaInteractive({
 
       <CardContent className="px-2 pt-4 sm:px-6 sm:pt-6">
         {/* แสดงกราฟ */}
+        <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block size-2 rounded-full " style={{ background: "var(--color-all)" }} />
+            <p className="text-base text-gray-900 dark:text-white">
+              ทั้งหมด {totalCount} เครื่อง
+            </p>
+            {typeFilter !== "ALL" && <span className="ml-1 opacity-80">({typeFilter})</span>}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block size-2 rounded-full" style={{ background: "var(--color-active)" }} />
+            <p className="text-base text-gray-900 dark:text-white">
+              ใช้งานอยู่ {activeCount} เครื่อง
+            </p>
+          </span>
+        </div>
         <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
+
           <AreaChart data={data}>
             {/* กำหนด gradient สีสำหรับพื้นที่กราฟ */}
             <defs>

@@ -72,9 +72,24 @@ export function SectionCards({ devices }: { devices: DeviceRow[] }) {
     return typeof left === "number" && left >= 0 && left <= 90;
   }).length
   const expiringUp = expiring90 <= Math.max(1, Math.floor(total * 0.05)) // ถ้าน้อยกว่า ~5% ถือว่าดี
+  // ช่วยตรวจว่าถือเป็น "อยู่ในคลัง" ไหม (รองรับไทย/อังกฤษที่พบบ่อย)
+  const isInventory = (d: DeviceRow) => {
+    const s = (d.status ?? "").toString().trim().toUpperCase();
+    return (
+      s === "อยู่ในคลัง" || // ไทยมาตรฐานของคุณ
+      s === "INVENTORY" ||
+      s === "IN_STOCK" ||
+      s === "STOCK" ||
+      s === "WAREHOUSE"
+    );
+  };
+
+  const inventoryCount = devices.filter(isInventory).length;
+  const inventoryLow = inventoryCount < 50; // เกณฑ์ตามที่ต้องการ
+
 
   return (
-    <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+    <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-5">
       {/* Total Devices */}
       <Card className="@container/card">
         <CardHeader>
@@ -157,6 +172,36 @@ export function SectionCards({ devices }: { devices: DeviceRow[] }) {
           </div>
         </CardFooter>
       </Card>
+      {/* อยู่ในคลัง*/}
+      {/* อยู่ในคลัง */}
+      <Card className="@container/card">
+        <CardHeader>
+          <CardDescription>อยู่ในคลัง</CardDescription>
+          <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+            {inventoryCount.toLocaleString()}
+          </CardTitle>
+          <CardAction>
+            <Badge variant="outline">
+              {inventoryLow ? <IconTrendingDown /> : <IconTrendingUp />}
+              {inventoryLow ? "เหลือน้อย" : "ปกติ"}
+            </Badge>
+          </CardAction>
+        </CardHeader>
+        <CardFooter className="flex-col items-start gap-1.5 text-sm">
+          <div className="line-clamp-1 flex gap-2 font-medium">
+            {inventoryLow ? "อุปกรณ์ในคลังเหลือน้อย" : "คลังปกติ"}{" "}
+            {inventoryLow ? (
+              <IconTrendingDown className="size-4" />
+            ) : (
+              <IconTrendingUp className="size-4" />
+            )}
+          </div>
+          <div className="text-muted-foreground">
+            เกณฑ์: น้อยกว่า 50 ชิ้นจะแจ้งเตือน
+          </div>
+        </CardFooter>
+      </Card>
+
 
       {/* ใกล้หมดประกัน */}
       <Card className="@container/card">
