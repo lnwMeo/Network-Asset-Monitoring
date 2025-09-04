@@ -6,7 +6,6 @@ import {
 } from "@/components/ui/dialog"
 import { useState, useEffect } from "react"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 
 
@@ -38,7 +37,6 @@ export default function DeviceTypeDialog({
                     </DialogTitle>
                 </DialogHeader>
                 <div className="grid gap-4">
-                    <Label>ชื่อ DeviceType</Label>
                     <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
                 </div>
                 <DialogFooter>

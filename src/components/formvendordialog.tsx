@@ -35,7 +35,6 @@ export default function VendorDialog({
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
-          <Label>ชื่อ Vendor</Label>
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}

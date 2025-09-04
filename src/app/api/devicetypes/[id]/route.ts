@@ -2,62 +2,67 @@
 import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
 
+import { z } from "zod";
+const BodySchema = z.object({
+  name: z.string().trim().min(1, "Name is required"),
+});
+
 export async function PUT(
-  req: NextRequest,
-  { params }: { params: { id: string } }
+req: NextRequest,
+  { params }: { params: Promise<{ id: string }> } // 👈 params เป็น Promise
 ) {
   try {
-    const { name } = await req.json();
-    const id = parseInt(params.id);
+    const { id } = await params;                  // 👈 ต้อง await ก่อนใช้
+    const deviceTypeId = Number(id);
+    if (!Number.isFinite(deviceTypeId)) {
+      return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    }
 
-    if (!name) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    const body = await req.json();
+    const parsed = BodySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", issues: parsed.error.flatten() },
+        { status: 400 }
+      );
     }
 
     const deviceType = await prisma.deviceType.update({
-      where: { id },
-      data: { name }
+      where: { id: deviceTypeId },
+      data: { name: parsed.data.name },
     });
 
     return NextResponse.json(deviceType);
   } catch (error) {
     console.error("Error updating device type:", error);
-    return NextResponse.json(
-      { error: "Failed to update device type" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to update device type" }, { status: 500 });
   }
 }
 
 export async function DELETE(
-  req: NextRequest,
-  { params }: { params: { id: string } }
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> } 
 ) {
   try {
-    const id = parseInt(params.id);
+    const { id } = await params;                 
+    const deviceTypeId = Number(id);
+    if (!Number.isFinite(deviceTypeId)) {
+      return NextResponse.json({ error: "Invalid id" }, { status: 400 });
+    }
 
-    // ตรวจสอบว่ามีการใช้ device type นี้อยู่หรือไม่
-    const deviceCount = await prisma.device.count({
-      where: { deviceTypeId: id }
-    });
-
-    if (deviceCount > 0) {
+    // กันลบถ้ามีการใช้งานอยู่
+    const inUse = await prisma.device.count({ where: { deviceTypeId } });
+    if (inUse > 0) {
       return NextResponse.json(
-        { error: "Cannot delete device type that is in use" },
-        { status: 400 }
+        { error: "DeviceType is in use", count: inUse },
+        { status: 409 }
       );
     }
 
-    await prisma.deviceType.delete({
-      where: { id }
-    });
-
-    return NextResponse.json({ message: "Device type deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting device type:", error);
-    return NextResponse.json(
-      { error: "Failed to delete device type" },
-      { status: 500 }
-    );
+    await prisma.deviceType.delete({ where: { id: deviceTypeId } });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: "Failed to delete" }, { status: 500 });
   }
 }

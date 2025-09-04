@@ -39,7 +39,7 @@ export function LoginForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="overflow-hidden p-0">
+      <Card className="overflow-hidden  p-0">
         <CardContent className="grid p-0 md:grid-cols-2">
           {/* ==== login form ==== */}
           <form onSubmit={handleSubmit} className="p-6 md:p-8">
@@ -47,7 +47,7 @@ export function LoginForm({
               <div className="flex flex-col items-center text-center">
                 <h1 className="text-2xl font-bold">Welcome back</h1>
                 <p className="text-muted-foreground text-balance">
-                  Login to your Acme Inc account
+                  NETWORK-ASSET
                 </p>
               </div>
               <div className="grid gap-3">
@@ -64,12 +64,6 @@ export function LoginForm({
               <div className="grid gap-3">
                 <div className="flex items-center">
                   <Label htmlFor="password">Password</Label>
-                  <a
-                    href="#"
-                    className="ml-auto text-sm underline-offset-2 hover:underline"
-                  >
-                    Forgot your password?
-                  </a>
                 </div>
                 <Input
                   id="password"
@@ -89,7 +83,7 @@ export function LoginForm({
           {/* ==== right side image ==== */}
           <div className="bg-muted relative hidden md:block">
             <Image
-              src="/images/Designer.jpeg"
+              src="/images/gen4.png"
               alt="Image"
               fill
               className="absolute inset-0 h-full w-full object-cover dark:brightness-[0.5] dark:grayscale"
@@ -97,10 +91,7 @@ export function LoginForm({
           </div>
         </CardContent>
       </Card>
-      <div className="text-muted-foreground *:[a]:hover:text-primary text-center text-xs text-balance *:[a]:underline *:[a]:underline-offset-4">
-        By clicking continue, you agree to our{" "}
-        <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>.
-      </div>
+
     </div>
   )
 }

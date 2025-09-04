@@ -1,7 +1,6 @@
 "use client"
 
 import * as React from "react"
-import { useState, useRef } from "react"
 import {
   DialogContent, DialogHeader, DialogTitle,
   DialogFooter, DialogClose,
@@ -11,45 +10,29 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { Card, CardContent } from "@/components/ui/card"
-import VendorDialog from "./formvendordialog"
-import ModelDialog from "./formmodeldialog"
-import DeviceTypeDialog from "./formdevicetypedialog"
+// import VendorDialog from "./formvendordialog"
+// import ModelDialog from "./formmodeldialog"
+// import DeviceTypeDialog from "./formdevicetypedialog"
 import BuildingDialog from "./frombuildingdialog"
-import RoomDialog from "./formroomdialog"
-import StatusDeviceDialog from "./formstatusdevicedialog"
+// import RoomDialog from "./formroomdialog"
+// import StatusDeviceDialog from "./formstatusdevicedialog"
+
+import WidgetDialog from "./formdialogwidget"
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@/components/ui/dropdown-menu"
 import { MoreHorizontal, Upload, X, Star, ImageIcon } from "lucide-react"
 import type { DeviceRow, DeviceImage } from "@/schemas/deviceSchema"
-// export type DeviceRow = {
-//   id: number
-//   assetTag: string
-//   name: string
-//   type: string
-//   deviceId: string
-//   status?: string
-//   vendor?: string | null
-//   model?: string | null
-//   ip?: string | null
-//   mac?: string | null
-//   buildingCode: string
-//   buildingName: string
-//   roomName: string
-//   roomId?: number | null
-//   purchaseDate?: string | null
-//   installDate?: string | null
-//   warrantyEnd?: string | null
-//   assetNumber?: string | null
-//   deviceTypeId?: number | null
 
-//   images?: {
-//     id: string | number
-//     url: string
-//     originalName: string
-//     isPrimary?: boolean
-//   }[]
-// }
+// ---------- helper: fetch JSON + error ชัดเจน + รองรับ abort ----------
+async function fetchJSON<T>(input: RequestInfo, init?: RequestInit & { signal?: AbortSignal }) {
+  const res = await fetch(input, init)
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(text || res.statusText)
+  }
+  return res.json() as Promise<T>
+}
 
 type FormValues = Omit<DeviceRow, "id">
 
@@ -58,15 +41,7 @@ interface Vendor { id: number, name: string }
 interface DeviceType { id: number, name: string }
 interface Room { id: number, name: string, buildingId: number }
 interface DeviceStatus { id: number, name: string }
-
-// interface DeviceImage {
-//   id?: number
-//   file?: File
-//   url: string
-//   originalName: string
-//   isPrimary: boolean
-//   isNew?: boolean
-// }
+interface Building { id: number, code: string, name: string }
 
 export default function FormDeviceDialogContent({
   mode = "create",
@@ -74,7 +49,7 @@ export default function FormDeviceDialogContent({
   onSubmit,
 }: {
   mode?: "create" | "edit"
-  initial?: Partial<FormValues>
+  initial?: Partial<FormValues> & { id?: number }
   onSubmit: (values: FormValues, images: DeviceImage[]) => void
 }) {
   const [form, setForm] = React.useState<FormValues>({
@@ -97,59 +72,312 @@ export default function FormDeviceDialogContent({
     warrantyEnd: "",
     assetNumber: "",
     deviceTypeId: null,
+    images: [], // ไม่ได้ใช้ส่งตรงจากฟอร์ม แต่ให้มี type ครบ
     ...initial,
   })
 
-  // === IMAGE SECTION ===
-  const [images, setImages] = useState<DeviceImage[]>([])
-  const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  // =========================================
+  // IMAGE SECTION (memory-safe)
+  // =========================================
+  const [images, setImages] = React.useState<DeviceImage[]>([])
+  const [uploading, setUploading] = React.useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const blobUrlsRef = React.useRef<string[]>([])
+  const [deletedImageIds, setDeletedImageIds] = React.useState<number[]>([]);
 
+  // รับ initial อื่นๆ มาทับ state
   React.useEffect(() => {
-    if (initial) setForm((prev) => ({ ...prev, ...initial }))
+    if (initial) setForm(prev => ({ ...prev, ...initial }))
   }, [initial])
 
-  function update<K extends keyof FormValues>(key: K, value: FormValues[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }))
+  // โหลดรูปเดิมเมื่อเข้าโหมดแก้ไข
+  React.useEffect(() => {
+    const editId = initial?.id
+    if (mode === "edit" && editId) {
+      fetchJSON<any[]>(`/api/devices/${editId}/images`)
+        .then(rows => {
+          setImages(
+            rows.map(row => ({
+              id: row.id,
+              url: row.url,
+              originalName: row.originalName,
+              isPrimary: !!row.isPrimary,
+              isNew: false,
+            }))
+          )
+        })
+        .catch(console.error)
+    }
+  }, [mode, initial?.id])
+
+  const handleFileSelect = React.useCallback((files: FileList | null) => {
+    if (!files) return
+    const next: DeviceImage[] = []
+    Array.from(files).forEach((file, idx) => {
+      if (file.type.startsWith("image/")) {
+        const url = URL.createObjectURL(file)
+        blobUrlsRef.current.push(url)
+        next.push({
+          file,
+          url,
+          originalName: file.name,
+          isPrimary: images.length === 0 && idx === 0,
+          isNew: true,
+        })
+      }
+    })
+    setImages(prev => [...prev, ...next])
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }, [images.length])
+
+  const removeImage = React.useCallback((idx: number) => {
+    setImages(prev => {
+      const target = prev[idx];
+      const next = prev.filter((_, i) => i !== idx);
+      if (target?.isPrimary && next.length > 0) next[0].isPrimary = true;
+
+      // ถ้าเป็นรูปเดิมจากเซิร์ฟเวอร์ (isNew === false) ให้จด id ไว้ลบใน DB
+      if (!target?.isNew && typeof target?.id === "number") {
+        setDeletedImageIds((ids) => ids.includes(target.id) ? ids : [...ids, target.id]);
+      }
+
+      if (target?.url?.startsWith("blob:")) URL.revokeObjectURL(target.url);
+      return next;
+    });
+  }, [])
+
+  const setPrimaryImage = React.useCallback((i: number) => {
+    setImages(p => p.map((it, idx) => ({ ...it, isPrimary: idx === i })))
+  }, [])
+
+  // cleanup blob urls ทั้งหมดตอน unmount
+  React.useEffect(() => {
+    return () => {
+      blobUrlsRef.current.forEach(u => { try { URL.revokeObjectURL(u) } catch { } })
+      blobUrlsRef.current = []
+    }
+  }, [])
+
+  // =========================================
+  // MASTER DATA
+  // =========================================
+  const [devicestatuss, setDevicestatuss] = React.useState<DeviceStatus[]>([])
+  const [addDeviceStatusOpen, setAddDeviceStatusOpen] = React.useState(false)
+  const [editDeviceStatusOpen, setEditDeviceStatusOpen] = React.useState(false)
+  const [editingDeviceStatus, setEditingDeviceStatus] = React.useState<DeviceStatus | null>(null)
+
+  React.useEffect(() => {
+    fetchJSON<DeviceStatus[]>("/api/devicestatus").then(setDevicestatuss).catch(console.error)
+  }, [])
+
+  const [vendors, setVendors] = React.useState<Vendor[]>([])
+  const [addVendorOpen, setAddVendorOpen] = React.useState(false)
+  const [editVendorOpen, setEditVendorOpen] = React.useState(false)
+  const [editingVendor, setEditingVendor] = React.useState<Vendor | null>(null)
+
+  React.useEffect(() => {
+    fetchJSON<Vendor[]>("/api/vendors").then(setVendors).catch(console.error)
+  }, [])
+
+  const [models, setModels] = React.useState<Model[]>([])
+  const [addModelOpen, setAddModelOpen] = React.useState(false)
+  const [editModelOpen, setEditModelOpen] = React.useState(false)
+  const [editingModel, setEditingModel] = React.useState<Model | null>(null)
+
+  const [devicetypes, setDevicetypes] = React.useState<DeviceType[]>([])
+  const [addDevicetypeOpen, setAddDevicetypeOpen] = React.useState(false)
+  const [editDevicetypeOpen, setEditDevicetypeOpen] = React.useState(false)
+  const [editingDevicetype, setEditingDevicetype] = React.useState<DeviceType | null>(null)
+
+  React.useEffect(() => {
+    fetchJSON<DeviceType[]>("/api/devicetypes").then(setDevicetypes).catch(console.error)
+  }, [])
+
+  const [buildings, setBuildings] = React.useState<Building[]>([])
+  const [rooms, setRooms] = React.useState<Room[]>([])
+  const [addBuildingOpen, setAddBuildingOpen] = React.useState(false)
+  const [editBuildingOpen, setEditBuildingOpen] = React.useState(false)
+  const [editingBuilding, setEditingBuilding] = React.useState<Building | null>(null)
+  const [addRoomOpen, setAddRoomOpen] = React.useState(false)
+  const [editRoomOpen, setEditRoomOpen] = React.useState(false)
+  const [editingRoom, setEditingRoom] = React.useState<Room | null>(null)
+
+  React.useEffect(() => {
+    fetchJSON<Building[]>("/api/buildings").then(setBuildings).catch(console.error)
+  }, [])
+
+  // =========================================
+  // ลด .find() ด้วย useMemo + derive ค่า id ที่เลือก
+  // =========================================
+  const vendorNameToId = React.useMemo(() => {
+    const m = new Map<string, number>()
+    vendors.forEach(v => m.set(v.name, v.id))
+    return m
+  }, [vendors])
+
+  const buildingCodeToObj = React.useMemo(() => {
+    const m = new Map<string, Building>()
+    buildings.forEach(b => m.set(b.code, b))
+    return m
+  }, [buildings])
+
+  const selectedVendorId = React.useMemo(
+    () => (form.vendor ? vendorNameToId.get(form.vendor) ?? null : null),
+    [form.vendor, vendorNameToId]
+  )
+
+  const selectedBuildingId = React.useMemo(
+    () => (form.buildingCode ? buildingCodeToObj.get(form.buildingCode)?.id ?? null : null),
+    [form.buildingCode, buildingCodeToObj]
+  )
+
+  // =========================================
+  // ดึง Models ตาม Vendor (ยกเลิกคำขอเก่าเมื่อเปลี่ยนเร็ว ๆ)
+  // =========================================
+  React.useEffect(() => {
+    if (!form.vendor) { setModels([]); setForm(prev => ({ ...prev, model: "" })); return }
+    const vid = selectedVendorId
+    if (!vid) return
+
+    const ac = new AbortController()
+    fetchJSON<Model[]>(`/api/models?vendorId=${vid}`, { signal: ac.signal })
+      .then(res => {
+        setModels(res)
+        if (form.model && !res.some(m => m.name === form.model)) {
+          setForm(prev => ({ ...prev, model: "" }))
+        }
+      })
+      .catch(err => { if ((err as any)?.name !== "AbortError") console.error(err) })
+
+    return () => ac.abort()
+    // form.model ใช้ในการ validate หลังโหลดเสร็จแล้ว ไม่ต้องใส่ใน deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.vendor, selectedVendorId])
+
+  // =========================================
+  // ดึง Rooms ตาม Building (ยกเลิกคำขอเก่าเมื่อเปลี่ยนเร็ว ๆ)
+  // =========================================
+  React.useEffect(() => {
+    if (!form.buildingCode) { setRooms([]); setForm(prev => ({ ...prev, roomName: "", roomId: null })); return }
+    const bid = selectedBuildingId
+    if (!bid) return
+
+    const ac = new AbortController()
+    fetchJSON<Room[]>(`/api/rooms?buildingId=${bid}`, { signal: ac.signal })
+      .then(res => {
+        setRooms(res)
+        if (form.roomId == null && form.roomName) {
+          const rr = res.find(x => x.name === form.roomName)
+          if (rr) setForm(prev => ({ ...prev, roomId: rr.id }))
+        }
+        if (form.roomName && !res.some(rr => rr.name === form.roomName)) {
+          setForm(prev => ({ ...prev, roomName: "", roomId: null }))
+        }
+      })
+      .catch(err => { if ((err as any)?.name !== "AbortError") console.error(err) })
+
+    return () => ac.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.buildingCode, selectedBuildingId])
+
+  // =========================================
+  // AUTO-MAP initial "name" -> "id" เมื่อ master data โหลดเสร็จ
+  // =========================================
+
+  // 1) statusName -> statusId
+  React.useEffect(() => {
+    if (devicestatuss.length && form.statusId == null && form.statusName) {
+      const m = devicestatuss.find(s => s.name === form.statusName)
+      if (m) setForm(prev => ({ ...prev, statusId: m.id }))
+    }
+  }, [devicestatuss, form.statusId, form.statusName])
+
+  // 2) type (deviceType name) -> deviceTypeId
+  React.useEffect(() => {
+    if (devicetypes.length && !form.deviceTypeId && form.type) {
+      const m = devicetypes.find(t => t.name === form.type)
+      if (m) {
+        setForm(prev => ({ ...prev, deviceTypeId: m.id, type: m.name }))
+      }
+    }
+  }, [devicetypes, form.deviceTypeId, form.type])
+
+  // 3) buildingName -> buildingCode (กรณี initial ให้ชื่อมา แต่ไม่ได้ให้ code)
+  React.useEffect(() => {
+    if (buildings.length && !form.buildingCode && form.buildingName) {
+      const b = buildings.find(x => x.name === form.buildingName)
+      if (b) setForm(prev => ({ ...prev, buildingCode: b.code }))
+    }
+  }, [buildings, form.buildingCode, form.buildingName])
+
+  // =========================================
+
+  function resetForm() {
+    // revoke blob ที่ค้างอยู่ใน images ตอน reset
+    images.forEach(img => {
+      if (img.url?.startsWith("blob:")) {
+        try { URL.revokeObjectURL(img.url) } catch { }
+        const i = blobUrlsRef.current.indexOf(img.url)
+        if (i !== -1) blobUrlsRef.current.splice(i, 1)
+      }
+    })
+    setForm({
+      assetTag: "",
+      name: "",
+      type: "",
+      deviceId: "",
+      statusId: null,
+      statusName: "",
+      vendor: "",
+      model: "",
+      ip: "",
+      mac: "",
+      buildingCode: "",
+      buildingName: "",
+      roomName: "",
+      roomId: null,
+      purchaseDate: "",
+      installDate: "",
+      warrantyEnd: "",
+      assetNumber: "",
+      images: [],
+    })
+    setImages([]) // เคลียร์รูปภาพที่แสดงในฟอร์ม
   }
 
   async function saveDevice() {
+    const { images: _omit, ...base } = form
     if (mode === "create") {
-      const res = await fetch("/api/devices", {
+      const device = await fetchJSON<{ id: number }>("/api/devices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
-      })
-      if (!res.ok) throw new Error("Create device error")
-      const device = await res.json()
-      return device.id
+      });
+      return device.id;
+    } else {
+      const payload = { ...base, deletedImageIds }; // ✅ ส่ง id ที่ลบทิ้ง
+      const device = await fetchJSON<{ id: number }>(`/api/devices/${initial!.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      setDeletedImageIds([]); // เคลียร์หลังสำเร็จ
+      return device.id;
     }
-    const res = await fetch(`/api/devices/${(initial as any).id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    })
-    if (!res.ok) throw new Error("Update device error")
-    const device = await res.json()
-    return device.id
   }
 
   async function uploadImages(devId: number) {
+    const newOnes = images.filter(img => img.isNew && img.file)
+    if (newOnes.length === 0) return
     const formData = new FormData()
-    images.filter(img => img.isNew).forEach(img => {
-      formData.append("images", img.file!)
-    })
-    if (formData.has("images")) {
-      await fetch(`/api/devices/${devId}/images`, {
-        method: "POST",
-        body: formData,
-      })
-    }
+    newOnes.forEach(img => formData.append("images", img.file!))
+    await fetchJSON(`/api/devices/${devId}/images`, { method: "POST", body: formData })
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.assetTag || !form.name || !form.type || !form.buildingName || !form.roomName) {
+    if (uploading) return // กันกดซ้ำ
+    if (!form.assetTag || !form.name || !form.deviceTypeId || form.statusId == null || !form.buildingCode || !form.roomId) {
       alert("กรุณากรอกข้อมูลที่จำเป็นให้ครบ")
       return
     }
@@ -159,112 +387,14 @@ export default function FormDeviceDialogContent({
       await uploadImages(id)
       onSubmit(form, images)
       alert("บันทึกสำเร็จ")
+      resetForm()
     } catch (err) {
       console.error(err)
-      alert("เกิดข้อผิดพลาด")
+      alert("เกิดข้อผิดพลาด อาจมีข้อมูลซ้ำ")
     } finally {
       setUploading(false)
     }
   }
-
-  const handleFileSelect = (files: FileList | null) => {
-    if (!files) return
-    const arr: DeviceImage[] = []
-    Array.from(files).forEach((file, idx) => {
-      if (file.type.startsWith("image/")) {
-        const url = URL.createObjectURL(file)
-        arr.push({ file, url, originalName: file.name, isPrimary: images.length === 0 && idx === 0, isNew: true })
-      }
-    })
-    setImages(prev => [...prev, ...arr])
-    if (fileInputRef.current) fileInputRef.current.value = ""
-  }
-
-  const removeImage = (idx: number) => {
-    setImages(prev => {
-      const next = prev.filter((_, i) => i !== idx)
-      if (prev[idx].isPrimary && next.length > 0) next[0].isPrimary = true
-      if (prev[idx].url.startsWith("blob:")) URL.revokeObjectURL(prev[idx].url)
-      return next
-    })
-  }
-
-  const setPrimaryImage = (i: number) => {
-    setImages(p => p.map((it, idx) => ({ ...it, isPrimary: idx === i })))
-  }
-
-  // ----- DeviceStatus -----
-  const [devicestatuss, setDevicestatuss] = useState<DeviceStatus[]>([])
-  const [addDeviceStatusOpen, setAddDeviceStatusOpen] = useState(false)
-  const [editDeviceStatusOpen, setEditDeviceStatusOpen] = useState(false)
-  const [editingDeviceStatus, setEditingDeviceStatus] = useState<DeviceStatus | null>(null)
-
-  React.useEffect(() => {
-    fetch("/api/devicestatus").then(r => r.json()).then(setDevicestatuss)
-  }, [])
-
-
-
-  // ----- Vendors/Models (เหมือนเดิม) -----
-  const [vendors, setVendors] = useState<Vendor[]>([])
-  const [addVendorOpen, setAddVendorOpen] = useState(false)
-  const [editVendorOpen, setEditVendorOpen] = useState(false)
-  const [editingVendor, setEditingVendor] = useState<Vendor | null>(null)
-
-  React.useEffect(() => {
-    fetch("/api/vendors").then(r => r.json()).then(setVendors)
-  }, [])
-
-  const [models, setModels] = useState<Model[]>([])
-  const [addModelOpen, setAddModelOpen] = useState(false)
-  const [editModelOpen, setEditModelOpen] = useState(false)
-  const [editingModel, setEditingModel] = useState<Model | null>(null)
-
-  React.useEffect(() => {
-    if (!form.vendor) { setModels([]); update("model", ""); return }
-    const v = vendors.find(v => v.name === form.vendor)
-    if (!v) return
-    fetch(`/api/models?vendorId=${v.id}`).then(r => r.json()).then((res) => {
-      setModels(res)
-      if (form.model && !res.some((m: Model) => m.name === form.model)) update("model", "")
-    })
-  }, [form.vendor, vendors])
-
-  // ----- DeviceType -----
-  const [devicetypes, setDevicetypes] = useState<DeviceType[]>([])
-  const [addDevicetypeOpen, setAddDevicetypeOpen] = useState(false)
-  const [editDevicetypeOpen, setEditDevicetypeOpen] = useState(false)
-  const [editingDevicetype, setEditingDevicetype] = useState<DeviceType | null>(null)
-
-  React.useEffect(() => {
-    fetch("/api/devicetypes").then(r => r.json()).then(setDevicetypes)
-  }, [])
-
-  // ----- Buildings/Rooms -----
-  const [buildings, setBuildings] = useState<{ id: number, code: string, name: string }[]>([])
-  const [rooms, setRooms] = useState<Room[]>([])
-  const [addBuildingOpen, setAddBuildingOpen] = useState(false)
-  const [editBuildingOpen, setEditBuildingOpen] = useState(false)
-  const [editingBuilding, setEditingBuilding] = useState<{ id: number, code: string, name: string } | null>(null)
-  const [addRoomOpen, setAddRoomOpen] = useState(false)
-  const [editRoomOpen, setEditRoomOpen] = useState(false)
-  const [editingRoom, setEditingRoom] = useState<Room | null>(null)
-
-  React.useEffect(() => {
-    fetch("/api/buildings").then(r => r.json()).then(setBuildings)
-  }, [])
-
-  React.useEffect(() => {
-    if (!form.buildingCode) { setRooms([]); update("roomName", ""); update("roomId", null); return }
-    const b = buildings.find(bb => bb.code === form.buildingCode)
-    if (!b) return
-    fetch(`/api/rooms?buildingId=${b.id}`).then(r => r.json()).then(res => {
-      setRooms(res)
-      if (form.roomName && !res.some((rr: Room) => rr.name === form.roomName)) {
-        update("roomName", ""); update("roomId", null)
-      }
-    })
-  }, [form.buildingCode, buildings])
 
   return (
     <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -273,28 +403,27 @@ export default function FormDeviceDialogContent({
         {/* Basic Information */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="grid gap-2">
-            <Label htmlFor="assetTag">Asset Tag<p className="text-red-600">*</p></Label>
-            <Input id="assetTag" value={form.assetTag} onChange={(e) => update("assetTag", e.target.value)} required />
+            <Label htmlFor="assetTag">Asset Tag<span className="text-red-600">*</span></Label>
+            <Input id="assetTag" value={form.assetTag} onChange={(e) => setForm(p => ({ ...p, assetTag: e.target.value }))} required />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="name">ชื่ออุปกรณ์<p className="text-red-600">*</p></Label>
-            <Input id="name" value={form.name} onChange={(e) => update("name", e.target.value)} required />
+            <Label htmlFor="name">ชื่ออุปกรณ์<span className="text-red-600">*</span></Label>
+            <Input id="name" value={form.name} onChange={(e) => setForm(p => ({ ...p, name: e.target.value }))} required />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="devicetype">ประเภท<p className="text-red-600">*</p></Label>
+            <Label htmlFor="devicetype">ประเภท<span className="text-red-600">*</span></Label>
             <div className="flex gap-2">
               <Select
-                value={form.deviceTypeId?.toString() ?? ""}
+                value={form.deviceTypeId != null ? String(form.deviceTypeId) : ""}
                 onValueChange={(value) => {
                   if (value === "__add__") {
                     setAddDevicetypeOpen(true)
                   } else {
-                    const deviceType = devicetypes.find(d => d.id.toString() === value)
-                    if (deviceType) {
-                      update("deviceTypeId", deviceType.id)
-                      update("type", deviceType.name)
+                    const dt = devicetypes.find(d => d.id.toString() === value)
+                    if (dt) {
+                      setForm(prev => ({ ...prev, deviceTypeId: dt.id, type: dt.name }))
                     }
                   }
                 }}
@@ -307,7 +436,7 @@ export default function FormDeviceDialogContent({
                     </SelectItem>
                   ))}
                   <SelectItem value="__add__" className="text-blue-500">
-                    + เพิ่ม DeviceType ใหม่...
+                    + เพิ่ม ประเภท ใหม่...
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -332,15 +461,20 @@ export default function FormDeviceDialogContent({
                       className="text-red-500"
                       onSelect={async () => {
                         const selectedDeviceType = devicetypes.find(d => d.id === form.deviceTypeId)
-                        if (selectedDeviceType && confirm("ลบ device type นี้?")) {
+                        if (selectedDeviceType && confirm("ลบ ประเภท นี้?")) {
                           try {
-                            await fetch(`/api/devicetypes/${selectedDeviceType.id}`, { method: "DELETE" })
+                            const res = await fetch(`/api/devicetypes/${selectedDeviceType.id}`, { method: "DELETE" })
+                            if (res.status === 409) {
+                              const j = await res.json()
+                              alert(`ไม่สามารถลบได้: ถูกใช้งานอยู่ ${j.count} รายการ`)
+                              return
+                            }
+                            if (!res.ok) throw new Error("delete device type failed")
                             setDevicetypes(prev => prev.filter(it => it.id !== selectedDeviceType.id))
-                            update("deviceTypeId", null)
-                            update("type", "")
+                            setForm(prev => ({ ...prev, deviceTypeId: null, type: "" }))
                           } catch (err) {
                             console.error("Error deleting device type:", err)
-                            alert("เกิดข้อผิดพลาดในการลบ device type")
+                            alert("เกิดข้อผิดพลาดในการลบ ประเภท")
                           }
                         }
                       }}
@@ -353,20 +487,18 @@ export default function FormDeviceDialogContent({
             </div>
           </div>
 
-
           <div className="grid gap-2">
-            <Label htmlFor="devicestatus">สถานะ <p className="text-red-600">*</p></Label>
+            <Label htmlFor="devicestatus">สถานะ <span className="text-red-600">*</span></Label>
             <div className="flex gap-2">
               <Select
-                value={form.statusId?.toString() ?? ""}
+                value={form.statusId != null ? String(form.statusId) : ""}
                 onValueChange={(value) => {
                   if (value === "__add__") {
                     setAddDeviceStatusOpen(true)
                   } else {
-                    const deviceStatus = devicestatuss.find(d => d.id.toString() === value)
-                    if (deviceStatus) {
-                      update("statusId", deviceStatus.id)
-                      update("statusName", deviceStatus.name)
+                    const ds = devicestatuss.find(d => d.id.toString() === value)
+                    if (ds) {
+                      setForm(prev => ({ ...prev, statusId: ds.id, statusName: ds.name }))
                     }
                   }
                 }}
@@ -383,7 +515,7 @@ export default function FormDeviceDialogContent({
                   </SelectItem>
                 </SelectContent>
               </Select>
-              {form.statusId && (
+              {form.statusId != null && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
@@ -406,10 +538,15 @@ export default function FormDeviceDialogContent({
                         const selectedDeviceStatus = devicestatuss.find(d => d.id === form.statusId)
                         if (selectedDeviceStatus && confirm("ลบสถานะนี้?")) {
                           try {
-                            await fetch(`/api/devicestatus/${selectedDeviceStatus.id}`, { method: "DELETE" })
+                            const response = await fetch(`/api/devicestatus/${selectedDeviceStatus.id}`, { method: "DELETE" })
+                            if (response.status === 409) {
+                              const errorData = await response.json()
+                              alert(`ไม่สามารถลบได้ เนื่องจากมีการใช้งานอยู่ ${errorData.count} รายการ`)
+                              return
+                            }
+                            if (!response.ok) throw new Error("Failed to delete device status")
                             setDevicestatuss(prev => prev.filter(it => it.id !== selectedDeviceStatus.id))
-                            update("statusId", null)
-                            update("statusName", "")
+                            setForm(prev => ({ ...prev, statusId: null, statusName: "" }))
                           } catch (err) {
                             console.error("Error deleting device status:", err)
                             alert("เกิดข้อผิดพลาดในการลบสถานะ")
@@ -427,12 +564,12 @@ export default function FormDeviceDialogContent({
 
           <div className="grid gap-2">
             <Label htmlFor="deviceId">รหัสครุภัณฑ์</Label>
-            <Input id="deviceId" value={form.deviceId ?? ""} onChange={(e) => update("deviceId", e.target.value)} />
+            <Input id="deviceId" value={form.deviceId ?? ""} onChange={(e) => setForm(p => ({ ...p, deviceId: e.target.value }))} />
           </div>
 
           {/* Vendor Section */}
           <div className="grid gap-2">
-            <Label htmlFor="vendor">ยี่ห้อ<p className="text-red-600">*</p></Label>
+            <Label htmlFor="vendor">ยี่ห้อ<span className="text-red-600">*</span></Label>
             <div className="flex gap-2">
               <Select
                 value={form.vendor ?? ""}
@@ -440,16 +577,17 @@ export default function FormDeviceDialogContent({
                   if (v === "__add__") {
                     setAddVendorOpen(true)
                   } else {
-                    update("vendor", v)
+                    // เมื่อเปลี่ยน vendor ให้เคลียร์ model เดิมทันทีเพื่อลด flash
+                    setForm(prev => ({ ...prev, vendor: v, model: "" }))
                   }
                 }}
               >
-                <SelectTrigger className="flex-1"><SelectValue placeholder="เลือก Vendor" /></SelectTrigger>
+                <SelectTrigger className="flex-1"><SelectValue placeholder="เลือก ยี่ห้อ" /></SelectTrigger>
                 <SelectContent>
                   {vendors.map((v) => (
                     <SelectItem key={v.id} value={v.name}>{v.name}</SelectItem>
                   ))}
-                  <SelectItem value="__add__" className="text-blue-500">+ เพิ่ม Vendor ใหม่...</SelectItem>
+                  <SelectItem value="__add__" className="text-blue-500">+ เพิ่ม ยี่ห้อ ใหม่...</SelectItem>
                 </SelectContent>
               </Select>
               {form.vendor && (
@@ -473,14 +611,20 @@ export default function FormDeviceDialogContent({
                       className="text-red-500"
                       onSelect={async () => {
                         const selectedVendor = vendors.find(v => v.name === form.vendor)
-                        if (selectedVendor && confirm("ลบ vendor นี้?")) {
+                        if (selectedVendor && confirm("ลบ ยี่ห้อ นี้?")) {
                           try {
-                            await fetch(`/api/vendors/${selectedVendor.id}`, { method: "DELETE" })
+                            const res = await fetch(`/api/vendors/${selectedVendor.id}`, { method: "DELETE" })
+                            if (res.status === 409) {
+                              const j = await res.json()
+                              alert(`ไม่สามารถลบได้: ถูกใช้งานอยู่ ${j.count} รายการ`)
+                              return
+                            }
+                            if (!res.ok) throw new Error("delete vendor failed")
                             setVendors(prev => prev.filter(it => it.id !== selectedVendor.id))
-                            update("vendor", "")
+                            setForm(prev => ({ ...prev, vendor: "", model: "" }))
                           } catch (err) {
                             console.error("Error deleting vendor:", err)
-                            alert("เกิดข้อผิดพลาดในการลบ vendor")
+                            alert("เกิดข้อผิดพลาดในการลบ ยี่ห้อ")
                           }
                         }
                       }}
@@ -495,32 +639,32 @@ export default function FormDeviceDialogContent({
 
           {/* Model Section */}
           <div className="grid gap-2">
-            <Label htmlFor="model">รุ่น<p className="text-red-600">*</p></Label>
+            <Label htmlFor="model">รุ่น<span className="text-red-600">*</span></Label>
             <div className="flex gap-2">
               <Select
                 value={form.model ?? ""}
                 onValueChange={(v) => {
                   if (v === "__add__") {
                     if (!form.vendor) {
-                      alert("กรุณาเลือก Vendor ก่อน")
+                      alert("กรุณาเลือก ยี่ห้อ ก่อน")
                       return
                     }
                     setAddModelOpen(true)
                   } else {
-                    update("model", v)
+                    setForm(prev => ({ ...prev, model: v }))
                   }
                 }}
                 disabled={!form.vendor}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={!form.vendor ? "เลือก Vendor ก่อน" : "เลือก Model"} />
+                  <SelectValue placeholder={!form.vendor ? "เลือก ยี่ห้อ ก่อน" : "เลือก รุ่น"} />
                 </SelectTrigger>
                 <SelectContent>
                   {models.map(m => (
                     <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
                   ))}
                   {form.vendor && (
-                    <SelectItem value="__add__" className="text-blue-500">+ เพิ่ม Model ใหม่...</SelectItem>
+                    <SelectItem value="__add__" className="text-blue-500">+ เพิ่ม รุ่น ใหม่...</SelectItem>
                   )}
                 </SelectContent>
               </Select>
@@ -547,9 +691,15 @@ export default function FormDeviceDialogContent({
                         const selectedModel = models.find(m => m.name === form.model)
                         if (selectedModel && confirm("ลบ model นี้?")) {
                           try {
-                            await fetch(`/api/models/${selectedModel.id}`, { method: "DELETE" })
+                            const res = await fetch(`/api/models/${selectedModel.id}`, { method: "DELETE" })
+                            if (res.status === 409) {
+                              const j = await res.json()
+                              alert(`ไม่สามารถลบได้: ถูกใช้งานอยู่ ${j.count} รายการ`)
+                              return
+                            }
+                            if (!res.ok) throw new Error("delete model failed")
                             setModels(p => p.filter(i => i.id !== selectedModel.id))
-                            update("model", "")
+                            setForm(prev => ({ ...prev, model: "" }))
                           } catch (err) {
                             console.error("Error deleting model:", err)
                             alert("เกิดข้อผิดพลาดในการลบ model")
@@ -567,28 +717,34 @@ export default function FormDeviceDialogContent({
 
           <div className="grid gap-2">
             <Label htmlFor="ip">IP Address</Label>
-            <Input id="ip" value={form.ip ?? ""} onChange={(e) => update("ip", e.target.value)} />
+            <Input id="ip" value={form.ip ?? ""} onChange={(e) => setForm(p => ({ ...p, ip: e.target.value }))} />
           </div>
 
           <div className="grid gap-2">
             <Label htmlFor="mac">MAC</Label>
-            <Input id="mac" value={form.mac ?? ""} onChange={(e) => update("mac", e.target.value)} />
+            <Input id="mac" value={form.mac ?? ""} onChange={(e) => setForm(p => ({ ...p, mac: e.target.value }))} />
           </div>
 
           {/* Building Section */}
           <div className="grid gap-2">
-            <Label>อาคาร<p className="text-red-600">*</p></Label>
+            <Label>อาคาร<span className="text-red-600">*</span></Label>
             <div className="flex gap-2">
               <Select
-                value={form.buildingCode}
+                value={form.buildingCode ?? ""}
                 onValueChange={(v) => {
                   if (v === "__add__") {
                     setAddBuildingOpen(true)
                   } else {
-                    const b = buildings.find(b => b.code === v)
+                    const b = buildingCodeToObj.get(v)
                     if (b) {
-                      update("buildingCode", b.code)
-                      update("buildingName", b.name)
+                      // batch update: ตั้ง building และเคลียร์ห้องทันที
+                      setForm(prev => ({
+                        ...prev,
+                        buildingCode: b.code,
+                        buildingName: b.name,
+                        roomId: null,
+                        roomName: "",
+                      }))
                     }
                   }
                 }}
@@ -608,17 +764,34 @@ export default function FormDeviceDialogContent({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent>
                     <DropdownMenuItem onSelect={() => {
-                      const b = buildings.find(bb => bb.code === form.buildingCode)
+                      const b = buildingCodeToObj.get(form.buildingCode!)
                       if (b) { setEditingBuilding(b); setEditBuildingOpen(true) }
                     }}>แก้ไข</DropdownMenuItem>
                     <DropdownMenuItem className="text-red-500"
                       onSelect={async () => {
-                        const b = buildings.find(bb => bb.code === form.buildingCode)
+                        const b = buildingCodeToObj.get(form.buildingCode!)
                         if (b && confirm("ลบ building นี้?")) {
-                          await fetch(`/api/buildings/${b.id}`, { method: "DELETE" })
-                          setBuildings(prev => prev.filter(it => it.id !== b.id))
-                          update("buildingCode", "")
-                          update("buildingName", "")
+                          try {
+                            const res = await fetch(`/api/buildings/${b.id}`, { method: "DELETE" })
+                            if (res.status === 409) {
+                              const j = await res.json()
+                              alert(`ไม่สามารถลบได้: ถูกใช้งานอยู่ ${j.count} รายการ`)
+                              return
+                            }
+                            if (!res.ok) throw new Error("delete building failed")
+                            setBuildings(prev => prev.filter(it => it.id !== b.id))
+                            setForm(prev => ({
+                              ...prev,
+                              buildingCode: "",
+                              buildingName: "",
+                              roomId: null,
+                              roomName: "",
+                            }))
+                            setRooms([])
+                          } catch (err) {
+                            console.error("Error deleting building:", err)
+                            alert("เกิดข้อผิดพลาดในการลบ building")
+                          }
                         }
                       }}>ลบ</DropdownMenuItem>
                   </DropdownMenuContent>
@@ -629,10 +802,10 @@ export default function FormDeviceDialogContent({
 
           {/* Room Section */}
           <div className="grid gap-2">
-            <Label htmlFor="room">ห้อง<p className="text-red-600">*</p></Label>
+            <Label htmlFor="room">ห้อง<span className="text-red-600">*</span></Label>
             <div className="flex gap-2">
               <Select
-                value={form.roomId?.toString() ?? ""}
+                value={form.roomId != null ? String(form.roomId) : ""}
                 onValueChange={(v) => {
                   if (v === "__add__") {
                     if (!form.buildingCode) {
@@ -643,8 +816,7 @@ export default function FormDeviceDialogContent({
                   } else {
                     const room = rooms.find(r => r.id.toString() === v)
                     if (room) {
-                      update("roomId", room.id)
-                      update("roomName", room.name)
+                      setForm(prev => ({ ...prev, roomId: room.id, roomName: room.name }))
                     }
                   }
                 }}
@@ -662,7 +834,7 @@ export default function FormDeviceDialogContent({
                   )}
                 </SelectContent>
               </Select>
-              {form.roomId && (
+              {form.roomId != null && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button size="icon" variant="outline"><MoreHorizontal size={16} /></Button>
@@ -685,10 +857,15 @@ export default function FormDeviceDialogContent({
                         const selectedRoom = rooms.find(r => r.id === form.roomId)
                         if (selectedRoom && confirm("ลบห้องนี้?")) {
                           try {
-                            await fetch(`/api/rooms/${selectedRoom.id}`, { method: "DELETE" })
+                            const res = await fetch(`/api/rooms/${selectedRoom.id}`, { method: "DELETE" })
+                            if (res.status === 409) {
+                              const j = await res.json()
+                              alert(`ไม่สามารถลบได้: ถูกใช้งานอยู่ ${j.count} รายการ`)
+                              return
+                            }
+                            if (!res.ok) throw new Error("delete room failed")
                             setRooms(prev => prev.filter(it => it.id !== selectedRoom.id))
-                            update("roomId", null)
-                            update("roomName", "")
+                            setForm(prev => ({ ...prev, roomId: null, roomName: "" }))
                           } catch (err) {
                             console.error("Error deleting room:", err)
                             alert("เกิดข้อผิดพลาดในการลบห้อง")
@@ -705,18 +882,18 @@ export default function FormDeviceDialogContent({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="purchaseDate">วันที่ซื้อ<p className="text-red-600">*</p></Label>
-            <Input id="purchaseDate" type="date" value={form.purchaseDate ?? ""} onChange={(e) => update("purchaseDate", e.target.value)} />
+            <Label htmlFor="purchaseDate">วันที่ซื้อ</Label>
+            <Input id="purchaseDate" type="date" value={form.purchaseDate ?? ""} onChange={(e) => setForm(p => ({ ...p, purchaseDate: e.target.value }))} />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="installDate">วันที่ติดตั้ง<p className="text-red-600">*</p></Label>
-            <Input id="installDate" type="date" value={form.installDate ?? ""} onChange={(e) => update("installDate", e.target.value)} />
+            <Label htmlFor="installDate">วันที่ติดตั้ง</Label>
+            <Input id="installDate" type="date" value={form.installDate ?? ""} onChange={(e) => setForm(p => ({ ...p, installDate: e.target.value }))} />
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="warrantyEnd">สิ้นสุดประกัน<p className="text-red-600">*</p></Label>
-            <Input id="warrantyEnd" type="date" value={form.warrantyEnd ?? ""} onChange={(e) => update("warrantyEnd", e.target.value)} />
+            <Label htmlFor="warrantyEnd">สิ้นสุดประกัน</Label>
+            <Input id="warrantyEnd" type="date" value={form.warrantyEnd ?? ""} onChange={(e) => setForm(p => ({ ...p, warrantyEnd: e.target.value }))} />
           </div>
         </div>
 
@@ -754,6 +931,8 @@ export default function FormDeviceDialogContent({
                         src={image.url}
                         alt={image.originalName}
                         className="w-full h-full object-cover rounded"
+                        loading="lazy"
+                        decoding="async"
                       />
 
                       {/* Primary badge */}
@@ -814,31 +993,36 @@ export default function FormDeviceDialogContent({
           )}
         </div>
 
-        <DialogFooter className="gap-2">
-          <DialogClose asChild>
-            <Button type="button" variant="outline">ยกเลิก</Button>
-          </DialogClose>
-          <Button type="submit">{mode === "edit" ? "บันทึกการเปลี่ยนแปลง" : "บันทึก"}</Button>
-        </DialogFooter>
+        <div className="flex justify-between">
+          <Button variant="outline" onClick={resetForm}>ล้างฟอร์ม</Button>
+          <DialogFooter className="gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">ยกเลิก</Button>
+            </DialogClose>
+            <Button type="submit" disabled={uploading}>
+              {mode === "edit"
+                ? (uploading ? "กำลังบันทึก..." : "บันทึกการเปลี่ยนแปลง")
+                : (uploading ? "กำลังบันทึก..." : "บันทึก")}
+            </Button>
+          </DialogFooter>
+        </div>
       </form>
 
       {/* Vendor Dialogs */}
-      <VendorDialog
+      <WidgetDialog
         open={addVendorOpen}
         setOpen={setAddVendorOpen}
-        title="เพิ่ม Vendor ใหม่"
+        title="เพิ่มยี่ห้อใหม่"
         initialName=""
         onSave={async (name) => {
           try {
-            const res = await fetch("/api/vendors", {
+            const v = await fetchJSON<Vendor>("/api/vendors", {
               method: "POST",
               body: JSON.stringify({ name }),
               headers: { "Content-Type": "application/json" },
             })
-            if (!res.ok) throw new Error("Failed to create vendor")
-            const v = await res.json()
             setVendors(prev => [...prev, v])
-            update("vendor", v.name)
+            setForm(prev => ({ ...prev, vendor: v.name }))
           } catch (err) {
             console.error("Error creating vendor:", err)
             alert("เกิดข้อผิดพลาดในการสร้าง vendor")
@@ -847,24 +1031,23 @@ export default function FormDeviceDialogContent({
       />
 
       {editingVendor && (
-        <VendorDialog
+        <WidgetDialog
           open={editVendorOpen}
           setOpen={(open) => {
             setEditVendorOpen(open)
             if (!open) setEditingVendor(null)
           }}
-          title="แก้ไข Vendor"
+          title="แก้ไขยี่ห้อ"
           initialName={editingVendor.name}
           onSave={async (name) => {
             try {
-              const res = await fetch(`/api/vendors/${editingVendor.id}`, {
+              await fetchJSON(`/api/vendors/${editingVendor.id}`, {
                 method: "PUT",
                 body: JSON.stringify({ name }),
                 headers: { "Content-Type": "application/json" },
               })
-              if (!res.ok) throw new Error("Failed to update vendor")
               setVendors(prev => prev.map((it) => it.id === editingVendor.id ? { ...it, name } : it))
-              update("vendor", name)
+              setForm(prev => ({ ...prev, vendor: name }))
             } catch (err) {
               console.error("Error updating vendor:", err)
               alert("เกิดข้อผิดพลาดในการแก้ไข vendor")
@@ -874,34 +1057,24 @@ export default function FormDeviceDialogContent({
       )}
 
       {/* Model Dialogs */}
-      <ModelDialog
+      <WidgetDialog
         open={addModelOpen}
         setOpen={setAddModelOpen}
-        title="เพิ่ม Model ใหม่"
+        title="เพิ่มรุ่นใหม่"
         onSave={async (name) => {
           try {
-            const selectedVendor = vendors.find(v => v.name === form.vendor)
-            if (!selectedVendor) {
-              alert("ไม่พบ vendor ที่เลือก")
+            const vid = selectedVendorId
+            if (!vid) {
+              alert("ไม่พบ ยี่ห้อ ที่เลือก")
               return
             }
-
-            const res = await fetch("/api/models", {
+            const m = await fetchJSON<Model>("/api/models", {
               method: "POST",
-              body: JSON.stringify({
-                name,
-                vendorId: selectedVendor.id
-              }),
+              body: JSON.stringify({ name, vendorId: vid }),
               headers: { "Content-Type": "application/json" },
             })
-            if (!res.ok) throw new Error("Failed to create model")
-            const m = await res.json()
-
-            setModels(prev => {
-              if (prev.some(item => item.id === m.id || item.name === m.name)) return prev
-              return [...prev, m]
-            })
-            update("model", m.name)
+            setModels(prev => (prev.some(item => item.id === m.id || item.name === m.name) ? prev : [...prev, m]))
+            setForm(prev => ({ ...prev, model: m.name }))
           } catch (err) {
             console.error("Error creating model:", err)
             alert("เกิดข้อผิดพลาดในการสร้าง model")
@@ -910,24 +1083,23 @@ export default function FormDeviceDialogContent({
       />
 
       {editingModel && (
-        <ModelDialog
+        <WidgetDialog
           open={editModelOpen}
           setOpen={(open) => {
             setEditModelOpen(open)
             if (!open) setEditingModel(null)
           }}
           initialName={editingModel.name}
-          title="แก้ไข Model"
+          title="แก้ไขรุ่น"
           onSave={async (name) => {
             try {
-              const res = await fetch(`/api/models/${editingModel.id}`, {
+              await fetchJSON(`/api/models/${editingModel.id}`, {
                 method: "PUT",
                 body: JSON.stringify({ name }),
                 headers: { "Content-Type": "application/json" },
               })
-              if (!res.ok) throw new Error("Failed to update model")
               setModels(p => p.map((it) => (it.id === editingModel.id ? { ...it, name } : it)))
-              update("model", name)
+              setForm(prev => ({ ...prev, model: name }))
             } catch (err) {
               console.error("Error updating model:", err)
               alert("เกิดข้อผิดพลาดในการแก้ไข model")
@@ -937,23 +1109,20 @@ export default function FormDeviceDialogContent({
       )}
 
       {/* DeviceType Dialogs */}
-      <DeviceTypeDialog
+      <WidgetDialog
         open={addDevicetypeOpen}
         setOpen={setAddDevicetypeOpen}
-        title="เพิ่ม DeviceType ใหม่"
+        title="เพิ่มประเภทใหม่"
         initialName=""
         onSave={async (name) => {
           try {
-            const res = await fetch("/api/devicetypes", {
+            const d = await fetchJSON<DeviceType>("/api/devicetypes", {
               method: "POST",
               body: JSON.stringify({ name }),
               headers: { "Content-Type": "application/json" },
             })
-            if (!res.ok) throw new Error("Failed to create device type")
-            const d = await res.json()
             setDevicetypes(prev => [...prev, d])
-            update("deviceTypeId", d.id)
-            update("type", d.name)
+            setForm(prev => ({ ...prev, deviceTypeId: d.id, type: d.name }))
           } catch (err) {
             console.error("Error creating device type:", err)
             alert("เกิดข้อผิดพลาดในการสร้าง device type")
@@ -962,24 +1131,23 @@ export default function FormDeviceDialogContent({
       />
 
       {editingDevicetype && (
-        <DeviceTypeDialog
+        <WidgetDialog
           open={editDevicetypeOpen}
           setOpen={(open) => {
             setEditDevicetypeOpen(open)
             if (!open) setEditingDevicetype(null)
           }}
-          title="แก้ไข DeviceType"
+          title="แก้ไขประเภท"
           initialName={editingDevicetype.name}
           onSave={async (name) => {
             try {
-              const res = await fetch(`/api/devicetypes/${editingDevicetype.id}`, {
+              await fetchJSON(`/api/devicetypes/${editingDevicetype.id}`, {
                 method: "PUT",
                 body: JSON.stringify({ name }),
                 headers: { "Content-Type": "application/json" },
               })
-              if (!res.ok) throw new Error("Failed to update device type")
               setDevicetypes(prev => prev.map((it) => it.id === editingDevicetype.id ? { ...it, name } : it))
-              update("type", name)
+              setForm(prev => ({ ...prev, type: name }))
             } catch (err) {
               console.error("Error updating device type:", err)
               alert("เกิดข้อผิดพลาดในการแก้ไข device type")
@@ -997,16 +1165,19 @@ export default function FormDeviceDialogContent({
         initialName=""
         onSave={async (code, name) => {
           try {
-            const res = await fetch("/api/buildings", {
+            const b = await fetchJSON<Building>("/api/buildings", {
               method: "POST",
               body: JSON.stringify({ code, name }),
               headers: { "Content-Type": "application/json" }
             })
-            if (!res.ok) throw new Error("Failed to create building")
-            const b = await res.json()
             setBuildings(prev => [...prev, b])
-            update("buildingCode", b.code)
-            update("buildingName", b.name)
+            setForm(prev => ({
+              ...prev,
+              buildingCode: b.code,
+              buildingName: b.name,
+              roomId: null,
+              roomName: "",
+            }))
           } catch (err) {
             console.error("Error creating building:", err)
             alert("เกิดข้อผิดพลาดในการสร้างอาคาร")
@@ -1023,16 +1194,13 @@ export default function FormDeviceDialogContent({
           initialName={editingBuilding.name}
           onSave={async (code, name) => {
             try {
-              const res = await fetch(`/api/buildings/${editingBuilding.id}`, {
+              const upd = await fetchJSON<Building>(`/api/buildings/${editingBuilding.id}`, {
                 method: "PUT",
                 body: JSON.stringify({ code, name }),
                 headers: { "Content-Type": "application/json" }
               })
-              if (!res.ok) throw new Error("Failed to update building")
-              const upd = await res.json()
               setBuildings(prev => prev.map(it => it.id === upd.id ? upd : it))
-              update("buildingCode", upd.code)
-              update("buildingName", upd.name)
+              setForm(prev => ({ ...prev, buildingCode: upd.code, buildingName: upd.name }))
             } catch (err) {
               console.error("Error updating building:", err)
               alert("เกิดข้อผิดพลาดในการแก้ไขอาคาร")
@@ -1042,36 +1210,26 @@ export default function FormDeviceDialogContent({
       )}
 
       {/* Room Dialogs */}
-      <RoomDialog
+      <WidgetDialog
         open={addRoomOpen}
         setOpen={setAddRoomOpen}
         title="เพิ่มห้องใหม่"
         initialName=""
         onSave={async (name) => {
           try {
-            const selectedBuilding = buildings.find(b => b.code === form.buildingCode)
-            if (!selectedBuilding) {
+            const bid = selectedBuildingId
+            if (!bid) {
               alert("ไม่พบอาคารที่เลือก")
               return
             }
-
-            const res = await fetch("/api/rooms", {
+            const r = await fetchJSON<Room>("/api/rooms", {
               method: "POST",
-              body: JSON.stringify({
-                name,
-                buildingId: selectedBuilding.id
-              }),
+              body: JSON.stringify({ name, buildingId: bid }),
               headers: { "Content-Type": "application/json" },
             })
-            if (!res.ok) throw new Error("Failed to create room")
-            const r = await res.json()
 
-            setRooms(prev => {
-              if (prev.some(item => item.id === r.id || item.name === r.name)) return prev
-              return [...prev, r]
-            })
-            update("roomId", r.id)
-            update("roomName", r.name)
+            setRooms(prev => (prev.some(item => item.id === r.id || item.name === r.name) ? prev : [...prev, r]))
+            setForm(prev => ({ ...prev, roomId: r.id, roomName: r.name }))
           } catch (err) {
             console.error("Error creating room:", err)
             alert("เกิดข้อผิดพลาดในการสร้างห้อง")
@@ -1080,7 +1238,7 @@ export default function FormDeviceDialogContent({
       />
 
       {editingRoom && (
-        <RoomDialog
+        <WidgetDialog
           open={editRoomOpen}
           setOpen={(open) => {
             setEditRoomOpen(open)
@@ -1090,14 +1248,13 @@ export default function FormDeviceDialogContent({
           initialName={editingRoom.name}
           onSave={async (name) => {
             try {
-              const res = await fetch(`/api/rooms/${editingRoom.id}`, {
+              await fetchJSON(`/api/rooms/${editingRoom.id}`, {
                 method: "PUT",
                 body: JSON.stringify({ name }),
                 headers: { "Content-Type": "application/json" },
               })
-              if (!res.ok) throw new Error("Failed to update room")
               setRooms(prev => prev.map((it) => it.id === editingRoom.id ? { ...it, name } : it))
-              update("roomName", name)
+              setForm(prev => ({ ...prev, roomName: name }))
             } catch (err) {
               console.error("Error updating room:", err)
               alert("เกิดข้อผิดพลาดในการแก้ไขห้อง")
@@ -1106,24 +1263,21 @@ export default function FormDeviceDialogContent({
         />
       )}
 
-
-        <StatusDeviceDialog
+      {/* Device Status Dialogs */}
+      <WidgetDialog
         open={addDeviceStatusOpen}
         setOpen={setAddDeviceStatusOpen}
         title="เพิ่มสถานะใหม่"
         initialName=""
         onSave={async (name) => {
           try {
-            const res = await fetch("/api/devicestatus", {
+            const d = await fetchJSON<DeviceStatus>("/api/devicestatus", {
               method: "POST",
               body: JSON.stringify({ name }),
               headers: { "Content-Type": "application/json" },
             })
-            if (!res.ok) throw new Error("Failed to create device status")
-            const d = await res.json()
             setDevicestatuss(prev => [...prev, d])
-            update("statusId", d.id)
-            update("statusName", d.name)
+            setForm(prev => ({ ...prev, statusId: d.id, statusName: d.name }))
           } catch (err) {
             console.error("Error creating device status:", err)
             alert("เกิดข้อผิดพลาดในการสร้างสถานะ")
@@ -1132,7 +1286,7 @@ export default function FormDeviceDialogContent({
       />
 
       {editingDeviceStatus && (
-        <StatusDeviceDialog
+        <WidgetDialog
           open={editDeviceStatusOpen}
           setOpen={(open) => {
             setEditDeviceStatusOpen(open)
@@ -1142,14 +1296,13 @@ export default function FormDeviceDialogContent({
           initialName={editingDeviceStatus.name}
           onSave={async (name) => {
             try {
-              const res = await fetch(`/api/devicestatus/${editingDeviceStatus.id}`, {
+              await fetchJSON(`/api/devicestatus/${editingDeviceStatus.id}`, {
                 method: "PUT",
                 body: JSON.stringify({ name }),
                 headers: { "Content-Type": "application/json" },
               })
-              if (!res.ok) throw new Error("Failed to update device status")
               setDevicestatuss(prev => prev.map((it) => it.id === editingDeviceStatus.id ? { ...it, name } : it))
-              update("statusName", name)
+              setForm(prev => ({ ...prev, statusName: name }))
             } catch (err) {
               console.error("Error updating device status:", err)
               alert("เกิดข้อผิดพลาดในการแก้ไขสถานะ")

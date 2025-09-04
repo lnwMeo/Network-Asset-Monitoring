@@ -1,45 +1,16 @@
 // src/schemas/deviceSchema.ts
 import { z } from "zod";
 
-/** ---------- Regex / Utils ---------- */
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
+// =============================================================================
+// CONSTANTS & REGEX PATTERNS
+// =============================================================================
 
-const IPv4_RE =
-  /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
-const IPv6_RE =
-  /^(([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,7}:|([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2}|([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3}|([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4}|([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}(:[0-9A-Fa-f]{1,4}){1,6}|:(:[0-9A-Fa-f]{1,4}){1,7}|::)$/;
-function isIP(v: string) { return IPv4_RE.test(v) || IPv6_RE.test(v); }
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD format
+const IPV4_REGEX = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const IPV6_REGEX = /^(([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,7}:|([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2}|([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3}|([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4}|([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}(:[0-9A-Fa-f]{1,4}){1,6}|:(:[0-9A-Fa-f]{1,4}){1,7}|::)$/;
 
-export function normalizeMac(mac: string) {
-  return mac.replace(/[^A-Fa-f0-9]/g, "")
-    .toUpperCase()
-    .match(/.{1,2}/g)?.join(":") ?? mac.toUpperCase();
-}
-const MAC_COLON_RE = /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/;
-
-// ด้านบนไฟล์ (ใกล้ IPv4_RE/IPv6_RE)
-function isCIDR(v: string) {
-  const parts = v.split("/");
-  if (parts.length !== 2) return false;
-  const [addr, prefixStr] = parts;
-  const prefix = Number(prefixStr);
-  if (!Number.isInteger(prefix)) return false;
-  if (IPv4_RE.test(addr)) return prefix >= 0 && prefix <= 32;
-  if (IPv6_RE.test(addr)) return prefix >= 0 && prefix <= 128;
-  return false;
-}
-
-
-const HAS_FILE = typeof File !== "undefined";
-const SafeFile = z.any().refine(
-  v => (HAS_FILE ? v instanceof File : true),
-  { message: "Expected File object" }
-);
-
-const isUrlOrPath = (u: string) => /^https?:\/\//i.test(u) || u.startsWith("/");
-
-/** ---------- Status mapping (EN/TH → TH canonical) ---------- */
-const CANON = {
+// Status mapping constants
+const CANONICAL_STATUS = {
   ACTIVE: "กำลังใช้งาน",
   WARNING: "กำลังแก้ไข",
   REPAIR: "กำลังแก้ไข",
@@ -50,230 +21,428 @@ const CANON = {
 } as const;
 
 const STATUS_ALIASES: Record<string, string> = {
-  ACTIVE: CANON.ACTIVE,
-  WARNING: CANON.WARNING,
-  REPAIR: CANON.REPAIR,
-  RETIRED: CANON.RETIRED,
-  UNKNOWN: CANON.UNKNOWN,
-  STORAGE: CANON.STORAGE,
-  INVENTORY: CANON.INVENTORY,
-  // ไทย -> ไทย
-  "กำลังใช้งาน": "กำลังใช้งาน",
-  "ไม่ได้ใช้งาน": "ไม่ได้ใช้งาน",
-  "กำลังแก้ไข": "กำลังแก้ไข",
-  "อยู่ในคลัง": "อยู่ในคลัง",
+  // English aliases
+  ACTIVE: CANONICAL_STATUS.ACTIVE,
+  WARNING: CANONICAL_STATUS.WARNING,
+  REPAIR: CANONICAL_STATUS.REPAIR,
+  RETIRED: CANONICAL_STATUS.RETIRED,
+  UNKNOWN: CANONICAL_STATUS.UNKNOWN,
+  STORAGE: CANONICAL_STATUS.STORAGE,
+  INVENTORY: CANONICAL_STATUS.INVENTORY,
+
+  // Thai aliases (identity mapping)
+  "กำลังใช้งาน": CANONICAL_STATUS.ACTIVE,
+  "ไม่ได้ใช้งาน": CANONICAL_STATUS.RETIRED,
+  "กำลังแก้ไข": CANONICAL_STATUS.WARNING,
+  "อยู่ในคลัง": CANONICAL_STATUS.STORAGE,
 };
 
-export function toCanonicalStatus(input?: string | null) {
-  if (!input) return CANON.ACTIVE;
-  const key = input.toUpperCase?.() ? input.toUpperCase() : input;
-  return STATUS_ALIASES[key] ?? CANON.ACTIVE;
+const HAS_FILE_SUPPORT = typeof File !== "undefined";
+
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+/**
+ * Check if a string is a valid IPv4 or IPv6 address
+ */
+function isValidIP(value: string): boolean {
+  return IPV4_REGEX.test(value) || IPV6_REGEX.test(value);
 }
 
-/** ---------- Image schemas ---------- */
-// รูปเดิมจาก DB
-const existingImageSchema = z.object({
+/**
+ * Check if a string is a valid CIDR notation
+ */
+function isValidCIDR(value: string): boolean {
+  const parts = value.split("/");
+  if (parts.length !== 2) return false;
+
+  const [address, prefixString] = parts;
+  const prefix = Number(prefixString);
+
+  if (!Number.isInteger(prefix)) return false;
+
+  if (IPV4_REGEX.test(address)) {
+    return prefix >= 0 && prefix <= 32;
+  }
+
+  if (IPV6_REGEX.test(address)) {
+    return prefix >= 0 && prefix <= 128;
+  }
+
+  return false;
+}
+
+/**
+ * Normalize MAC address to standard format (AA:BB:CC:DD:EE:FF)
+ */
+export function normalizeMacAddress(mac: string): string {
+  const cleaned = mac.replace(/[^A-Fa-f0-9]/g, "").toUpperCase();
+  const segments = cleaned.match(/.{1,2}/g);
+
+  return segments ? segments.join(":") : mac.toUpperCase();
+}
+
+/**
+ * Convert input status to canonical Thai status
+ */
+export function toCanonicalStatus(input?: string | null): string {
+  if (!input) return CANONICAL_STATUS.ACTIVE;
+
+  const normalizedKey = input.toUpperCase?.() ? input.toUpperCase() : input;
+  return STATUS_ALIASES[normalizedKey] ?? CANONICAL_STATUS.ACTIVE;
+}
+
+/**
+ * Check if string is a URL or file path
+ */
+function isUrlOrPath(url: string): boolean {
+  return /^https?:\/\//i.test(url) || url.startsWith("/");
+}
+
+// =============================================================================
+// ZOD SCHEMAS
+// =============================================================================
+
+/**
+ * Safe File schema that works in both browser and server environments
+ */
+const SafeFileSchema = z.any().refine(
+  (value) => (HAS_FILE_SUPPORT ? value instanceof File : true),
+  { message: "Expected File object" }
+);
+
+/**
+ * Schema for existing images from database
+ */
+const ExistingImageSchema = z.object({
   id: z.number().int().positive(),
-  url: z.string().min(1).refine(isUrlOrPath, "invalid image URL"),
+  url: z.string().min(1).refine(isUrlOrPath, "Invalid image URL"),
   originalName: z.string().min(1),
   isPrimary: z.boolean().default(false),
   isNew: z.literal(false).optional(),
-  file: z.never().optional(), // รูปเดิมต้องไม่มีไฟล์
+  file: z.never().optional(), // Existing images should not have files
 });
 
-// รูปใหม่จากฟอร์ม
-const newImageSchema = z.object({
+/**
+ * Schema for new images from forms
+ */
+const NewImageSchema = z.object({
   id: z.number().optional(),
-  url: z.string().optional(), // ยังไม่ต้องมี URL
+  url: z.string().optional(), // URL not required yet
   originalName: z.string().optional(),
   isPrimary: z.boolean().default(false),
   isNew: z.literal(true),
-  file: SafeFile,
+  file: SafeFileSchema,
 });
 
-export const imageSchema = z.union([existingImageSchema, newImageSchema]);
+/**
+ * Union schema for both existing and new images
+ */
+export const imageSchema = z.union([ExistingImageSchema, NewImageSchema]);
 
-/** ---------- Device row schema (UI/Table/Form) ---------- */
+/**
+ * Main device schema for UI/Table/Form
+ */
 export const schema = z
   .object({
+    // Required fields
     id: z.coerce.number().int(),
-    assetTag: z.string().min(1, "assetTag is required"),
-    name: z.string().min(1, "name is required"),
+    assetTag: z.string().min(1, "Asset tag is required"),
+    name: z.string().min(1, "Device name is required"),
 
-    // ชื่อประเภท (โชว์ใน UI) + id สำหรับส่งกลับ
+    // Device type information
     type: z.string().default(""),
     deviceTypeId: z.coerce.number().int().nullable().optional(),
-
     deviceId: z.string().default(""),
 
-    // สถานะ: เดิม (string), ใหม่ (ไทย) + id
+    // Status information
     status: z.string().nullable().optional(),
-    statusId: z.coerce.number().int().nullable().optional(),
-    statusName: z.string().nullable().optional(),
+    statusId: z.coerce.number().int().optional(),
+    statusName: z.string().optional(),
 
+    // Device specifications
     vendor: z.string().nullable().optional(),
     model: z.string().nullable().optional(),
 
-  ip: z
-  .string()
-  .nullable()
-  .optional()
-  .transform((v) => {
-    if (v == null) return null;
-    const s = String(v).trim();
-    // แปลงค่าที่ถือว่า "ว่าง" ให้เป็น null
-    if (!s || s === "-" || s.toUpperCase() === "N/A") return null;
+    // Network configuration with validation and transformation
+    ip: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((value) => {
+        if (value == null) return null;
 
-    // ผ่านถ้าเป็น IPv4/IPv6 หรือ CIDR
-    if (isIP(s) || isCIDR(s)) return s;
+        const trimmed = String(value).trim();
 
-    // ไม่ใช่รูปแบบมาตรฐาน → แสดงค่าเดิม (ไม่โยน error)
-    return s;
-  }),
+        // Convert empty-like values to null
+        if (!trimmed || trimmed === "-" || trimmed.toUpperCase() === "N/A") {
+          return null;
+        }
+
+        // Return as-is if valid IP or CIDR, otherwise preserve original
+        if (isValidIP(trimmed) || isValidCIDR(trimmed)) {
+          return trimmed;
+        }
+
+        return trimmed; // Preserve non-standard formats without throwing error
+      }),
 
     mac: z
       .string()
       .nullable()
       .optional()
-      .transform((v) => {
-        if (v == null) return null;
-        const s = String(v).trim();
-        if (!s) return null;
+      .transform((value) => {
+        if (value == null) return null;
 
-        // พยายาม normalize เป็น AA:BB:CC:DD:EE:FF
-        const cleaned = s.replace(/[^A-Fa-f0-9]/g, "").toUpperCase();
+        const trimmed = String(value).trim();
+        if (!trimmed) return null;
+
+        // Try to normalize to standard format
+        const cleaned = trimmed.replace(/[^A-Fa-f0-9]/g, "").toUpperCase();
         if (cleaned.length === 12) {
           return cleaned.match(/.{1,2}/g)!.join(":");
         }
 
-        // ถ้า normalize ไม่ได้ ให้แสดงค่าดิบเดิม (อย่าแปลงเป็น null)
-        return s;
+        // Return original value if normalization fails
+        return trimmed;
       }),
 
-
-    // Display
+    // Location information (display)
     buildingCode: z.string().default(""),
     buildingName: z.string().default(""),
     roomName: z.string().default(""),
 
-    // ส่งกลับ API
+    // Location information (for API)
     roomId: z.coerce.number().int().nullable().optional(),
     assetNumber: z.string().nullable().optional(),
 
-    purchaseDate: z.string().nullable().optional()
-      .refine(v => v == null || v === "" || DATE_RE.test(v), "Date must be YYYY-MM-DD"),
-    installDate: z.string().nullable().optional()
-      .refine(v => v == null || v === "" || DATE_RE.test(v), "Date must be YYYY-MM-DD"),
-    warrantyEnd: z.string().nullable().optional()
-      .refine(v => v == null || v === "" || DATE_RE.test(v), "Date must be YYYY-MM-DD"),
+    // Date fields with validation
+    purchaseDate: z
+      .string()
+      .nullable()
+      .optional()
+      .refine(
+        (value) => value == null || value === "" || DATE_REGEX.test(value),
+        "Date must be in YYYY-MM-DD format"
+      ),
 
+    installDate: z
+      .string()
+      .nullable()
+      .optional()
+      .refine(
+        (value) => value == null || value === "" || DATE_REGEX.test(value),
+        "Date must be in YYYY-MM-DD format"
+      ),
+
+    warrantyEnd: z
+      .string()
+      .nullable()
+      .optional()
+      .refine(
+        (value) => value == null || value === "" || DATE_REGEX.test(value),
+        "Date must be in YYYY-MM-DD format"
+      ),
+
+    // Images array
     images: z.array(imageSchema).default([]),
   })
-  .transform((val) => {
-    const statusName = toCanonicalStatus(val.statusName ?? val.status ?? undefined);
-    return { ...val, statusName };
+  .transform((data) => {
+    // Normalize status to canonical Thai format
+    const statusName = toCanonicalStatus(data.statusName ?? data.status ?? undefined);
+    return { ...data, statusName };
   })
-  .superRefine((val, ctx) => {
-    const primaries = val.images.filter(i => i.isPrimary);
-    if (primaries.length > 1) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "มีรูปหลักได้เพียง 1 รูป", path: ["images"] });
+  .superRefine((data, context) => {
+    // Validate that there's only one primary image
+    const primaryImages = data.images.filter(image => image.isPrimary);
+    if (primaryImages.length > 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "มีรูปหลักได้เพียง 1 รูปเท่านั้น",
+        path: ["images"]
+      });
     }
   });
+
+// =============================================================================
+// TYPE EXPORTS
+// =============================================================================
 
 export type DeviceRow = z.infer<typeof schema>;
 export type DeviceImage = z.infer<typeof imageSchema>;
 
-/** ---------- Helpers ---------- */
-export function ensureOnePrimary(images: DeviceImage[]) {
-  const primaries = images.filter(i => i.isPrimary);
-  if (primaries.length === 0 && images.length > 0) {
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+/**
+ * Ensure exactly one primary image in the array
+ */
+export function ensureOnePrimaryImage(images: DeviceImage[]): DeviceImage[] {
+  const primaryImages = images.filter(image => image.isPrimary);
+
+  if (primaryImages.length === 0 && images.length > 0) {
+    // No primary image found, make first image primary
     images[0].isPrimary = true;
-  } else if (primaries.length > 1) {
-    let seen = false;
-    for (const img of images) {
-      if (img.isPrimary) {
-        if (!seen) seen = true;
-        else img.isPrimary = false;
+  } else if (primaryImages.length > 1) {
+    // Multiple primary images found, keep only the first one
+    let foundFirst = false;
+    for (const image of images) {
+      if (image.isPrimary) {
+        if (!foundFirst) {
+          foundFirst = true;
+        } else {
+          image.isPrimary = false;
+        }
       }
     }
   }
+
   return images;
 }
 
-/** API -> UI row */
-export function adaptDeviceFromApi(d: any): DeviceRow {
+// =============================================================================
+// TYPE DEFINITIONS
+// =============================================================================
+
+/**
+ * API Image data structure
+ */
+interface ApiImageData {
+  id: number;
+  url: string;
+  originalName: string;
+  isPrimary?: boolean;
+}
+
+/**
+ * API Device data structure (flexible typing to handle various API responses)
+ */
+interface ApiDeviceData {
+  id: number;
+  assetTag: string;
+  name: string;
+  deviceType?: { name?: string } | null;
+  deviceTypeId?: number | null;
+  deviceId?: string | null;
+  status?: string | { name?: string };
+  statusId?: number;
+  vendor?: string | { name?: string } | null;
+  model?: string | { name?: string } | null;
+  ipAddress?: string | null;
+  mac?: string | null;
+  building?: { code?: string; name?: string } | null;
+  buildingCode?: string | null;
+  room?: { name?: string } | null;
+  roomId?: number | null;
+  assetNumber?: string | null;
+  purchaseDate?: string | null;
+  installDate?: string | null;
+  warrantyEnd?: string | null;
+  images?: ApiImageData[] | null;
+}
+
+/**
+ * Adapt device data from API response to UI row format
+ */
+export function adaptDeviceFromApi(apiData: ApiDeviceData): DeviceRow {
   const row: DeviceRow = {
-    id: d.id,
-    assetTag: d.assetTag,
-    name: d.name,
-    type: d.deviceType?.name ?? "",
-    deviceTypeId: d.deviceTypeId ?? null,
-    deviceId: d.deviceId ?? d.assetTag,
+    id: apiData.id,
+    assetTag: apiData.assetTag,
+    name: apiData.name,
 
-    status: typeof d.status === "string" ? d.status : d.status?.name ?? null,
-    statusId: d.statusId ?? null,
-    statusName: typeof d.status === "string" ? d.status : d.status?.name ?? null,
+    // Device type
+    type: apiData.deviceType?.name ?? "",
+    deviceTypeId: apiData.deviceTypeId ?? null,
+    deviceId: apiData.deviceId ?? apiData.assetTag,
 
-    vendor: d.vendor?.name ?? d.vendor ?? null,
-    model: d.model?.name ?? d.model ?? null,
+    // Status - ensure we handle null values properly
+    status: (typeof apiData.status === "string"
+      ? apiData.status
+      : apiData.status?.name) ?? null,
+    statusId: apiData.statusId ?? null,
+    statusName: ((typeof apiData.status === "string")
+      ? apiData.status
+      : apiData.status?.name) as string,
 
-    ip: d.ipAddress ?? null,
-    mac: d.mac ?? null,
+    // Specifications
+    vendor: typeof apiData.vendor === "string"
+      ? apiData.vendor
+      : apiData.vendor?.name ?? null,
+    model: typeof apiData.model === "string"
+      ? apiData.model
+      : apiData.model?.name ?? null,
 
-    buildingCode: d.building?.code ?? d.buildingCode ?? "",
-    buildingName: d.building?.name ?? "",
-    roomName: d.room?.name ?? "",
-    roomId: d.roomId ?? null,
+    // Network
+    ip: apiData.ipAddress ?? null,
+    mac: apiData.mac ?? null,
 
-    assetNumber: d.assetNumber ?? null,
+    // Location
+    buildingCode: apiData.building?.code ?? apiData.buildingCode ?? "",
+    buildingName: apiData.building?.name ?? "",
+    roomName: apiData.room?.name ?? "",
+    roomId: apiData.roomId ?? null,
 
-    purchaseDate: d.purchaseDate ? String(d.purchaseDate).slice(0, 10) : null,
-    installDate: d.installDate ? String(d.installDate).slice(0, 10) : null,
-    warrantyEnd: d.warrantyEnd ? String(d.warrantyEnd).slice(0, 10) : null,
+    assetNumber: apiData.assetNumber ?? null,
 
-    images: (d.images ?? []).map((im: any) => ({
-      id: im.id,
-      url: im.url, // จะเป็น absolute หรือ path ก็ได้ (page.tsx จะ prefix ให้)
-      originalName: im.originalName,
-      isPrimary: !!im.isPrimary,
+    // Dates (convert to YYYY-MM-DD format)
+    purchaseDate: apiData.purchaseDate ? String(apiData.purchaseDate).slice(0, 10) : null,
+    installDate: apiData.installDate ? String(apiData.installDate).slice(0, 10) : null,
+    warrantyEnd: apiData.warrantyEnd ? String(apiData.warrantyEnd).slice(0, 10) : null,
+
+    // Images
+    images: (apiData.images ?? []).map((imageData: ApiImageData) => ({
+      id: imageData.id,
+      url: imageData.url,
+      originalName: imageData.originalName,
+      isPrimary: !!imageData.isPrimary,
       isNew: false,
     })),
   };
-  row.images = ensureOnePrimary(row.images);
+
+  // Ensure exactly one primary image
+  row.images = ensureOnePrimaryImage(row.images);
+
   return row;
 }
 
-/** UI form -> Payload สำหรับ POST/PUT JSON (ไม่รวมไฟล์) */
-export function buildDeviceJsonPayload(form: DeviceRow) {
+/**
+ * Build JSON payload for POST/PUT requests (excluding files)
+ */
+export function buildDeviceJsonPayload(formData: DeviceRow) {
   return {
-    assetTag: form.assetTag,
-    deviceId: form.deviceId || form.assetTag,
-    name: form.name,
-    deviceTypeId: form.deviceTypeId ?? undefined,
-    buildingId: undefined, // map จาก code -> id ฝั่ง UI/selector ก่อนส่ง
-    roomId: form.roomId ?? null,
+    assetTag: formData.assetTag,
+    deviceId: formData.deviceId || formData.assetTag,
+    name: formData.name,
+    deviceTypeId: formData.deviceTypeId ?? undefined,
+    buildingId: undefined, // Should be mapped from code to ID on UI side
+    roomId: formData.roomId ?? null,
     vendorId: undefined,
     modelId: undefined,
-    ip: form.ip || null,
-    mac: form.mac || null,
-    status: form.statusName || toCanonicalStatus(form.status || undefined),
-    purchaseDate: form.purchaseDate || null,
-    installDate: form.installDate || null,
-    warrantyEnd: form.warrantyEnd || null,
+    ip: formData.ip || null,
+    mac: formData.mac || null,
+    statusId: formData.statusId ?? 0, // หรือ throw error ถ้าไม่ควร fallback
+    status: formData.statusName || toCanonicalStatus(formData.status || undefined),
+    purchaseDate: formData.purchaseDate || null,
+    installDate: formData.installDate || null,
+    warrantyEnd: formData.warrantyEnd || null,
   };
 }
 
-/** รูปใหม่ -> FormData (สำหรับ endpoint upload) */
-export function buildImagesFormData(deviceId: number, images: DeviceImage[]) {
-  const fd = new FormData();
-  fd.set("deviceId", String(deviceId));
-  images.forEach((img, idx) => {
+/**
+ * Build FormData for image upload requests
+ */
+export function buildImagesFormData(deviceId: number, images: DeviceImage[]): FormData {
+  const formData = new FormData();
+  formData.set("deviceId", String(deviceId));
 
-    if (img?.isNew && img?.file) {
-
-      fd.append("files", img.file, img.file.name);
-      fd.append(`isPrimary_${idx}`, String(!!img.isPrimary));
+  images.forEach((image, index) => {
+    if (image?.isNew && image?.file) {
+      formData.append("files", image.file, image.file.name);
+      formData.append(`isPrimary_${index}`, String(!!image.isPrimary));
     }
   });
-  return fd;
+
+  return formData;
 }

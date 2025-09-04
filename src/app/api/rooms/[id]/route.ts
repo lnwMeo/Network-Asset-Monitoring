@@ -7,7 +7,7 @@ export async function PUT(request: NextRequest, context: { params: { id: string 
     const id = Number(idParam)
 
     const { name } = await request.json()
-    const updated = await prisma.model.update({
+    const updated = await prisma.room.update({
         where: { id },
         data: { name }
     })

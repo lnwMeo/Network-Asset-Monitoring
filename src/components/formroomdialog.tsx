@@ -39,7 +39,6 @@ export default function RoomDialog({
                     <DialogTitle>{title}</DialogTitle>
                 </DialogHeader>
                 <div className="grid gap-3">
-                    <Label>ห้อง *</Label>
                     <Input
                         value={name}
                         onChange={e => setName(e.target.value)}

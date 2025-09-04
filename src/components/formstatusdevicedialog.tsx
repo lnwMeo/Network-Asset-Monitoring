@@ -36,7 +36,6 @@ export default function StatusDeviceDialog({
                     </DialogTitle>
                 </DialogHeader>
                 <div className="grid gap-4">
-                    <Label>ชื่อ ประเภท</Label>
                     <Input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
                 </div>
                 <DialogFooter>

@@ -2,8 +2,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { z } from "zod"
-import type { Prisma, DeviceStatus } from "@prisma/client"
-
+import type { Prisma } from "@prisma/client"
 
 const bodySchema = z.object({
   assetTag: z.string().min(1),
@@ -26,13 +25,11 @@ export async function POST(req: NextRequest) {
   try {
     // 1) ให้ body เป็น type ชัดเจน ไม่ใช่ any
     const input = bodySchema.parse(await req.json())
-
     // 2) หา id ของความสัมพันธ์
     const vendorId =
       input.vendor
         ? (await prisma.vendor.findFirst({ where: { name: input.vendor } }))?.id ?? null
         : null
-
     const modelId =
       input.model && vendorId
         ? (await prisma.model.findFirst({ where: { name: input.model, vendorId } }))?.id ?? null
@@ -44,33 +41,12 @@ export async function POST(req: NextRequest) {
     if (!buildingId) {
       return NextResponse.json({ error: "Invalid buildingCode" }, { status: 400 })
     }
-
-    // 3) กำหนดชนิดให้ data แบบชัดเจน (สองวิธี เลือกอย่างใดอย่างหนึ่ง)
-
-    // วิธี A: ใส่ชนิดให้ตัวแปร
-    const dataA: Prisma.DeviceUncheckedCreateInput = {
-      assetTag: input.assetTag,
-      deviceId: input.deviceId ?? input.assetTag,
-      name: input.name,
-      statusId: input.statusId ?? null,
-      ipAddress: input.ip ?? null,
-      mac: input.mac ?? null,
-      purchaseDate: input.purchaseDate ? new Date(input.purchaseDate) : null,
-      installDate: input.installDate ? new Date(input.installDate) : null,
-      warrantyEnd: input.warrantyEnd ? new Date(input.warrantyEnd) : null,
-      deviceTypeId: input.deviceTypeId,
-      buildingId,
-      roomId: input.roomId ?? null,
-      vendorId,
-      modelId,
-    }
-
     // หรือ วิธี B: ใช้ `satisfies` (เด้ง error ถ้า shape ไม่ตรง แต่ไม่ cast ทิ้ง)
     const data = {
       assetTag: input.assetTag,
       deviceId: input.deviceId ?? input.assetTag,
       name: input.name,
-      statusId: input.statusId ?? null,
+      statusId: input.statusId,
       ipAddress: input.ip ?? null,
       mac: input.mac ?? null,
       purchaseDate: input.purchaseDate ? new Date(input.purchaseDate) : null,

@@ -9,7 +9,8 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const deviceId = parseInt(params.id)
+    const { id } = await params;
+    const deviceId = Number(id);
     if (isNaN(deviceId)) {
       return NextResponse.json({ error: 'Invalid device id' }, { status: 400 })
     }
@@ -70,7 +71,8 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const deviceId = parseInt(params.id)
+    const { id } = await params;
+    const deviceId = Number(id);
     if (isNaN(deviceId)) {
       return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
     }

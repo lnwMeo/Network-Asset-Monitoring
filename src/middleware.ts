@@ -19,5 +19,5 @@ export async function middleware(request: NextRequest) {
 
 // ระบุเฉพาะ path ที่ต้องการ protect
 export const config = {
-  matcher: ["/dashboard/:path*","/settingpage/:path*"],
+  matcher: ["/dashboard/:path*"],
 };

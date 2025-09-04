@@ -34,11 +34,7 @@ const data = {
       url: "/dashboard",
       icon: IconListDetails,
     },
-    {
-      title: "ตั้งค่า",
-      url: "/settingpage",
-      icon: IconSettings2,
-    },
+  
   ],
 
 }

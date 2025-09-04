@@ -37,7 +37,8 @@ export default async function Page() {
   if (!session) redirect("/");
 
   const base = (process.env.NEXTAUTH_URL ?? "http://localhost:3000").replace(/\/$/, "");
-  const cookieHeader = cookies().toString();
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore.toString();
 
   // -------- fetch devices --------
   const devRes = await fetch(`${base}/api/devices`, {

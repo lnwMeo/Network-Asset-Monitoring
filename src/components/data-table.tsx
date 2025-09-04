@@ -148,6 +148,8 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
   React.useEffect(() => setData(initialData), [initialData]); // ✅ sync เมื่อ props เปลี่ยน
 
   const [showSuccess, setShowSuccess] = React.useState(false);
+  const [showError, setShowError] = React.useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = React.useState<number | null>(null);
   const [rowSelection, setRowSelection] = React.useState({});
   const [columnVisibility, setColumnVisibility] =
     React.useState<VisibilityState>({
@@ -270,6 +272,46 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
     [data, getStatusName]
   );
 
+  // ====== DELETE DEVICE HANDLER ======
+  const handleDeleteDevice = async (deviceId: number) => {
+    // ยืนยันการลบ
+    if (!confirm("คุณต้องการลบอุปกรณ์นี้ใช่หรือไม่?")) {
+      return;
+    }
+
+    setIsDeleting(deviceId);
+    setShowError(null);
+
+    try {
+      const response = await fetch(`/api/devices/${deviceId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      // ลบสำเร็จ - อัพเดท state
+      setData((prev) => prev.filter((device) => device.id !== deviceId));
+      
+      // แสดงข้อความสำเร็จ
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+
+    } catch (error) {
+      console.error("Error deleting device:", error);
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : "เกิดข้อผิดพลาดในการลบอุปกรณ์";
+      
+      setShowError(errorMessage);
+      setTimeout(() => setShowError(null), 5000);
+    } finally {
+      setIsDeleting(null);
+    }
+  };
+
   // Columns
   const columns: ColumnDef<DeviceRow>[] = [
     {
@@ -344,16 +386,16 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
       ),
     },
     {
-      accessorKey: "status",
+      id: "status",                                // ใช้ id แทน accessorKey
       header: "สถานะ",
-      cell: ({ row }) => (
-        <Badge
-          variant="outline"
-          className="text-muted-foreground px-1.5 w-32 justify-center"
-        >
-          {row.original.status}
+      accessorFn: (row) => getStatusName(row),     // <-- คืน string เสมอ
+      cell: ({ getValue }) => (
+        <Badge variant="outline" className="text-muted-foreground px-1.5 w-32 justify-center">
+          {getValue<string>()}
         </Badge>
       ),
+      sortingFn: "alphanumeric",
+      filterFn: (row, _id, value) => getStatusName(row.original) === value,
     },
     {
       accessorKey: "ip",
@@ -454,8 +496,15 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
               QRcode
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem /* variant="destructive" (ถ้า type ไม่รองรับ ลบ prop นี้) */>
-              ลบ
+            <DropdownMenuItem 
+              onSelect={(e) => {
+                e.preventDefault();
+                handleDeleteDevice(row.original.id);
+              }}
+              className="text-destructive focus:text-destructive"
+              disabled={isDeleting === row.original.id}
+            >
+              {isDeleting === row.original.id ? "กำลังลบ..." : "ลบ"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -523,10 +572,20 @@ export function DataTable({ data: initialData }: { data: DeviceRow[] }) {
         <Alert variant="success" className="mt-4 flex gap-2 items-start py-4">
           <div>
             <AlertTitle>สำเร็จ!</AlertTitle>
-            <AlertDescription>เพิ่มข้อมูลอุปกรณ์เรียบร้อยแล้ว</AlertDescription>
+            <AlertDescription>ดำเนินการเรียบร้อยแล้ว</AlertDescription>
           </div>
         </Alert>
       )}
+      
+      {showError && (
+        <Alert variant="destructive" className="mt-4 flex gap-2 items-start py-4">
+          <div>
+            <AlertTitle>เกิดข้อผิดพลาด!</AlertTitle>
+            <AlertDescription>{showError}</AlertDescription>
+          </div>
+        </Alert>
+      )}
+
       <Tabs defaultValue="table" className="w-full flex-col justify-start gap-6">
         <div className="flex items-center justify-between px-4 lg:px-6">
           <Label htmlFor="view-selector" className="sr-only">
