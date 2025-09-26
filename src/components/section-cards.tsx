@@ -72,6 +72,16 @@ export function SectionCards({ devices }: { devices: DeviceRow[] }) {
     return typeof left === "number" && left >= 0 && left <= 90;
   }).length
   const expiringUp = expiring90 <= Math.max(1, Math.floor(total * 0.05)) // ถ้าน้อยกว่า ~5% ถือว่าดี
+
+
+  // Warranty expired (< today)
+  const expiredCount = devices.filter((d) => {
+    const left = daysUntil(d.warrantyEnd)
+    return typeof left === "number" && left < 0
+  }).length
+
+
+
   // ช่วยตรวจว่าถือเป็น "อยู่ในคลัง" ไหม (รองรับไทย/อังกฤษที่พบบ่อย)
   const isInventory = (d: DeviceRow) => {
     const s = (d.status ?? "").toString().trim().toUpperCase();
@@ -89,7 +99,7 @@ export function SectionCards({ devices }: { devices: DeviceRow[] }) {
 
 
   return (
-    <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-5">
+    <div className="*:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card dark:*:data-[slot=card]:bg-card grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-gradient-to-t *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-6">
       {/* Total Devices */}
       <Card className="@container/card">
         <CardHeader>
@@ -226,6 +236,25 @@ export function SectionCards({ devices }: { devices: DeviceRow[] }) {
           </div>
         </CardFooter>
       </Card>
+
+      {/* หมดประกันแล้ว */}
+      <Card className="@container/card">
+        <CardHeader>
+          <CardDescription>หมดประกันแล้ว</CardDescription>
+          <CardTitle className="text-2xl font-semibold tabular-nums @[250px]/card:text-3xl">
+            {expiredCount.toLocaleString()}
+          </CardTitle>
+
+        </CardHeader>
+        <CardFooter className="flex-col items-start gap-1.5 text-sm">
+          <div className="line-clamp-1 flex gap-2 font-medium">
+            {expiredCount} อุปกรณ์หมดประกันแล้ว{" "}
+
+          </div>
+
+        </CardFooter>
+      </Card>
+
 
 
     </div>

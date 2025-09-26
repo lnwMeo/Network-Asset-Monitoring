@@ -91,9 +91,7 @@ export async function GET() {
 
   try {
     // ทดสอบการเชื่อมต่อ database ก่อน
-    console.log('📡 Testing database connection...')
-    await prisma.$connect()
-    console.log('✅ Database connected successfully')
+   
 
     // ลองนับจำนวน device ก่อน
     const deviceCount = await prisma.device.count()
@@ -105,8 +103,7 @@ export async function GET() {
       return NextResponse.json([])
     }
 
-    // ดึงข้อมูลทีละขั้นตอน
-    console.log('🔄 Fetching devices with relations...')
+
     const devices = await prisma.device.findMany({
       include: {
         deviceType: {
@@ -186,9 +183,5 @@ export async function GET() {
       { status: 500 }
     )
 
-  } finally {
-    // ปิดการเชื่อมต่อ
-    await prisma.$disconnect()
-    console.log('🔌 Database disconnected')
-  }
+  } 
 }

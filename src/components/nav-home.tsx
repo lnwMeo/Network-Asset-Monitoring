@@ -1,23 +1,45 @@
 import { ModeToggle } from "./ModeToggle"
 import { Button } from "./ui/button"
 import Link from "next/link"
+import Image from "next/image"
 
-const NavHome = () => {
+export default function NavHome() {
     return (
-        <nav className="bg-white dark:bg-gray-950/80 fixed w-full z-20 top-0 start-0 border-b ">
-            <div className="max-w-screen-2xl flex flex-wrap items-center justify-between mx-auto p-4 ">
+        <nav className="fixed inset-x-0 top-0 z-20 border-b bg-white/80 backdrop-blur dark:bg-zinc-950/80">
+            <div className="mx-auto flex max-w-screen-2xl items-center justify-between gap-4 px-4 py-3">
+                {/* โลโก้ + ชื่อระบบ */}
+                <Link href="/" className="flex items-center gap-3" aria-label="หน้าแรก">
+                    {/* โหมดสว่าง: ใช้ LogoD | โหมดมืด: ใช้ LogoW */}
+                    <Image
+                        src="/images/LogoW.png"
+                        alt="NRRU Logo"
+                        width={40}
+                        height={40}
+                        className="block h-8 w-8 object-contain dark:hidden"
+                        priority
+                    />
+                    <Image
+                        src="/images/LogoD.png"
+                        alt="NRRU Logo (dark)"
+                        width={40}
+                        height={40}
+                        className="hidden h-8 w-8 object-contain dark:block"
+                        priority
+                    />
 
-                <span className="self-center text-base font-semibold whitespace-nowrap dark:text-white">NETWORK-ASSET</span>
+                    <span className="text-sm font-semibold leading-tight whitespace-nowrap sm:text-base dark:text-white">
+                        ระบบรายงานทรัพย์สินด้านระบบสารสนเทศ
+                    </span>
+                </Link>
 
-                <div className="flex md:order-2 space-x-3 md:space-x-0 rtl:space-x-reverse gap-2">
-                    <Button variant="outline" size="sm">
+                {/* ปุ่มขวา */}
+                <div className="flex items-center gap-2">
+                    <Button asChild variant="outline" size="sm">
                         <Link href="/login">Login</Link>
                     </Button>
-                <ModeToggle />
+                    <ModeToggle />
                 </div>
             </div>
         </nav>
-
     )
 }
-export default NavHome

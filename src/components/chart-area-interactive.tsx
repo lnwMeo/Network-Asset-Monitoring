@@ -1,7 +1,15 @@
 "use client"
 
 import * as React from "react"
-import { Area, AreaChart, CartesianGrid, XAxis } from "recharts"
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  Rectangle,
+  LabelList,
+} from "recharts"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import {
@@ -28,7 +36,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Label } from "@/components/ui/label"
 
-// โครงสร้างข้อมูลของอุปกรณ์ (DeviceRow)
+// ===== ชนิดข้อมูลเดิม =====
 export type DeviceRow = {
   id: number
   assetTag: string
@@ -47,7 +55,7 @@ export type DeviceRow = {
   warrantyEnd?: string | null
 }
 
-// ฟังก์ชันคำนวณจำนวนวันระหว่างวันที่ระบุและปัจจุบัน
+// ===== helpers =====
 function daysBetween(from?: string | null) {
   if (!from) return null
   const d = new Date(from)
@@ -55,63 +63,72 @@ function daysBetween(from?: string | null) {
   const diff = Date.now() - d.getTime()
   return Math.floor(diff / (1000 * 60 * 60 * 24))
 }
+function normStatus(s?: string | null) {
+  return (s ?? "").toString().trim().toUpperCase()
+}
 function isActive(dev: DeviceRow) {
-  const s = (dev.status ?? "").toString().trim().toUpperCase()
+  const s = normStatus(dev.status)
+  return s === "ACTIVE" || s === "ใช้งาน" || s === "กำลังใช้งาน" || s === "IN_USE" || s === "INUSE"
+}
+function isStock(dev: DeviceRow) {
+  const s = normStatus(dev.status)
   return (
-    s === "ACTIVE" ||
-    s === "ใช้งาน" ||
-    s === "กำลังใช้งาน" ||
-    s === "IN_USE" ||
-    s === "INUSE"
+    s === "STOCK" || s === "IN_STOCK" || s === "INVENTORY" || s === "WAREHOUSE" ||
+    s === "STORE" || s === "SPARE" || s === "อยู่ในคลัง" || s === "คลัง" || s === "สำรอง"
   )
 }
-// โครงสร้างข้อมูลจุด (Point) สำหรับกราฟ
-type AgePoint = {
-  bucket: string // ป้ายช่วง เช่น "0–5m"
-  all: number    // จำนวนอุปกรณ์ทั้งหมด
-  active: number // จำนวนอุปกรณ์ที่ใช้งานอยู่
+function isRepair(dev: DeviceRow) {
+  const s = normStatus(dev.status)
+  return (
+    s === "REPAIR" || s === "UNDER_REPAIR" || s === "FIX" || s === "FIXING" ||
+    s === "MAINTENANCE" || s === "SERVICE" || s === "กำลังแก้ไข" || s === "ซ่อม" || s === "กำลังซ่อม"
+  )
 }
 
+// ===== จุดข้อมูลสำหรับกราฟ =====
+type AgePoint = {
+  bucket: string
+  all: number
+  active: number
+  stock: number
+  repair: number
+}
 
-// การตั้งค่ากราฟ (ChartConfig)
+// ===== config สีใน ChartContainer (แมปเป็น CSS vars) =====
 const chartConfig = {
-  all: { label: "อุปกรณ์ทั้งหมด", color: "var(--primary)" },
-  active: { label: "ใช้งานอยู่", color: "var(--primary)" },
+  all: { label: "ทั้งหมด", color: "var(--chart-1)" },
+  active: { label: "ใช้งานอยู่", color: "var(--chart-2)" },
+  stock: { label: "อยู่ในคลัง", color: "var(--chart-3)" },
+  repair: { label: "กำลังแก้ไข", color: "var(--chart-4)" },
 } satisfies ChartConfig
 
-// ฟังก์ชันสร้างข้อมูล series สำหรับกราฟอายุอุปกรณ์
+// ===== สร้าง series อายุเป็นบัคเก็ต =====
 function buildAgeSeries(
   devices: DeviceRow[],
   maxMonths: number,
   stepMonths: number
 ): AgePoint[] {
-  // เตรียม bucket สำหรับเก็บช่วงอายุ
   const buckets: AgePoint[] = []
   for (let start = 0; start < maxMonths; start += stepMonths) {
     const end = Math.min(start + stepMonths - 1, maxMonths - 1)
-    buckets.push({
-      bucket: `${start}–${end}m`,
-      all: 0,
-      active: 0,
-    })
+    buckets.push({ bucket: `${start}–${end}m`, all: 0, active: 0, stock: 0, repair: 0 })
   }
-  // เพิ่ม bucket สำหรับ "มากกว่าหรือเท่ากับ maxMonths"
-  buckets.push({ bucket: `≥${maxMonths}m`, all: 0, active: 0 })
+  buckets.push({ bucket: `≥${maxMonths}m`, all: 0, active: 0, stock: 0, repair: 0 })
 
-  // นับจำนวนอุปกรณ์ลง bucket
   for (const d of devices) {
     const days = daysBetween(d.purchaseDate) ?? 0
     const months = Math.max(0, Math.floor(days / 30))
-    const idx =
-      months >= maxMonths ? buckets.length - 1 : Math.floor(months / stepMonths)
+    const idx = months >= maxMonths ? buckets.length - 1 : Math.floor(months / stepMonths)
 
     buckets[idx].all += 1
     if (isActive(d)) buckets[idx].active += 1
+    if (isStock(d)) buckets[idx].stock += 1
+    if (isRepair(d)) buckets[idx].repair += 1
   }
   return buckets
 }
 
-// คอมโพเนนต์กราฟพื้นที่ (Area Chart) แบบโต้ตอบได้
+// ===== กราฟ Bar แบบโต้ตอบ =====
 export function ChartAreaInteractive({
   devices,
   title = "จำนวนและการกระจายอายุของอุปกรณ์",
@@ -120,21 +137,18 @@ export function ChartAreaInteractive({
   title?: string
 }) {
   const isMobile = useIsMobile()
-  // ค่าเริ่มต้นของช่วงเวลา (5 ปี = 60 เดือน / 3 ปี = 36 เดือน / 1 ปี = 12 เดือน)
   const [range, setRange] = React.useState<"5y" | "3y" | "1y">("5y")
-  // ใหม่: ตัวกรองประเภท
   const typeOptions = React.useMemo(
     () =>
       Array.from(new Set(devices.map((d) => d.type).filter(Boolean))).sort(),
     [devices]
   )
   const [typeFilter, setTypeFilter] = React.useState<string>("ALL")
-  // ถ้าเป็นมือถือให้ใช้ช่วง 3 ปี
+
   React.useEffect(() => {
     if (isMobile) setRange("3y")
   }, [isMobile])
 
-  // กำหนดค่าการแสดงผลกราฟตามช่วงที่เลือก
   const { maxMonths, stepMonths, subtitle } = React.useMemo(() => {
     if (range === "1y") return { maxMonths: 12, stepMonths: 1, subtitle: "ย้อนหลัง 12 เดือน" }
     if (range === "3y") return { maxMonths: 36, stepMonths: 3, subtitle: "ย้อนหลัง 3 ปี" }
@@ -151,9 +165,15 @@ export function ChartAreaInteractive({
     [filtered, maxMonths, stepMonths]
   )
 
-  // legend label + ตัวเลขสรุป
+  // ตัวเลขสรุป
   const totalCount = filtered.length
   const activeCount = filtered.filter(isActive).length
+  const stockCount = filtered.filter(isStock).length
+  const repairCount = filtered.filter(isRepair).length
+
+  // active bar effect (ตาม index ที่โฮเวอร์)
+  const [activeIndex, setActiveIndex] = React.useState<number | undefined>(undefined)
+
   return (
     <Card className="@container/card">
       <CardHeader>
@@ -164,7 +184,6 @@ export function ChartAreaInteractive({
         </CardDescription>
         <CardAction>
           <div className="flex gap-2">
-
             <div className="hidden items-center gap-2 @[767px]/card:flex">
               <Label htmlFor="type-filter" className="text-sm">ประเภท</Label>
               <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -181,7 +200,7 @@ export function ChartAreaInteractive({
                 </SelectContent>
               </Select>
             </div>
-            {/* ปุ่มเลือกช่วงเวลาแบบ Toggle */}
+
             <ToggleGroup
               type="single"
               value={range}
@@ -195,7 +214,7 @@ export function ChartAreaInteractive({
             </ToggleGroup>
           </div>
 
-          {/* ตัวเลือกช่วงเวลาแบบ Select (ใช้ในมือถือ) */}
+          {/* mobile range select */}
           <Select value={range} onValueChange={(v) => setRange(v as typeof range)}>
             <SelectTrigger
               className="flex w-40 **:data-[slot=select-value]:block **:data-[slot=select-value]:truncate @[767px]/card:hidden"
@@ -214,74 +233,122 @@ export function ChartAreaInteractive({
       </CardHeader>
 
       <CardContent className="px-2 pt-4 sm:px-6 sm:pt-6">
-        {/* แสดงกราฟ */}
-        <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block size-2 rounded-full " style={{ background: "var(--color-all)" }} />
-            <p className="text-base text-gray-900 dark:text-white">
-              ทั้งหมด {totalCount} เครื่อง
-            </p>
-            {typeFilter !== "ALL" && <span className="ml-1 opacity-80">({typeFilter})</span>}
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block size-2 rounded-full" style={{ background: "var(--color-active)" }} />
-            <p className="text-base text-gray-900 dark:text-white">
-              ใช้งานอยู่ {activeCount} เครื่อง
-            </p>
-          </span>
+        {/* legend / summary */}
+        {/* legend / summary (ใช้สีตรงกับกราฟ + fallback) */}
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+          {[
+            { key: "all", label: "ทั้งหมด", count: totalCount },
+            { key: "active", label: "ใช้งานอยู่", count: activeCount },
+            { key: "stock", label: "อยู่ในคลัง", count: stockCount },
+            { key: "repair", label: "กำลังแก้ไข", count: repairCount },
+          ].map((it) => {
+            // ใช้ var(--color-<key>) ถ้ามี (จะมีเมื่ออยู่ภายใน ChartContainer)
+            // ถ้าอยู่นอก ChartContainer จะ fallback เป็น chartConfig[key].color (เช่น var(--chart-1))
+            const fallback =
+              chartConfig[it.key as keyof typeof chartConfig].color
+            const dotColor = `var(--color-${it.key}, ${fallback})`
+
+            return (
+              <span key={it.key} className="inline-flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className="inline-block size-3 rounded-full ring-1 ring-black/10 dark:ring-white/10"
+                  style={{ background: dotColor }}
+                />
+                <span className="text-base text-foreground">
+                  {it.label} {it.count} เครื่อง
+                  {it.key === "all" && typeFilter !== "ALL" ? (
+                    <span className="ml-1 opacity-80">({typeFilter})</span>
+                  ) : null}
+                </span>
+              </span>
+            )
+          })}
         </div>
-        <ChartContainer config={chartConfig} className="aspect-auto h-[250px] w-full">
 
-          <AreaChart data={data}>
-            {/* กำหนด gradient สีสำหรับพื้นที่กราฟ */}
-            <defs>
-              <linearGradient id="fillAll" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="var(--color-all)" stopOpacity={1.0} />
-                <stop offset="95%" stopColor="var(--color-all)" stopOpacity={0.1} />
-              </linearGradient>
-              <linearGradient id="fillActive" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="var(--color-active)" stopOpacity={0.9} />
-                <stop offset="95%" stopColor="var(--color-active)" stopOpacity={0.1} />
-              </linearGradient>
-            </defs>
 
+        <ChartContainer config={chartConfig} className="aspect-auto h-[300px] w-full">
+          <BarChart
+            data={data}
+            margin={{ top: 8, right: 12, bottom: 28, left: 12 }}
+            onMouseMove={(state: any) => setActiveIndex(state?.activeTooltipIndex)}
+            onMouseLeave={() => setActiveIndex(undefined)}
+            accessibilityLayer
+          >
             <CartesianGrid vertical={false} />
-            <XAxis
-              dataKey="bucket"
-              tickLine={false}
-              axisLine={false}
-              tickMargin={8}
-              minTickGap={16}
-            />
+            <XAxis dataKey="bucket" tickLine={false} axisLine={false} tickMargin={10} minTickGap={16} />
+            <YAxis allowDecimals={false} />
+
             <ChartTooltip
               cursor={false}
               content={
                 <ChartTooltipContent
-                  indicator="dot"
+                  hideLabel
                   formatter={(value, name) => {
-                    const v = typeof value === "number" ? value : Number(value);
-                    if (name === "active") return `${v} เครื่องที่ใช้งานอยู่`;
-                    if (name === "all") return `${v} เครื่องทั้งหมด`;
-                    return String(value);
+                    const v = typeof value === "number" ? value : Number(value)
+                    if (name === "active") return `ที่ใช้งานอยู่ ${v} เครื่อง`
+                    if (name === "stock") return `อยู่ในคลัง ${v} เครื่อง`
+                    if (name === "repair") return `กำลังแก้ไข ${v} เครื่อง`
+                    if (name === "all") return `ทั้งหมด ${v} เครื่อง`
+                    return String(value)
                   }}
                 />
               }
             />
-            <Area
-              dataKey="active"
-              type="natural"
-              fill="url(#fillActive)"
-              stroke="var(--color-active)"
-              stackId="a"
-            />
-            <Area
+
+            {/* แท่งคู่/หลายแท่งแบบ grouped */}
+            <Bar
               dataKey="all"
-              type="natural"
-              fill="url(#fillAll)"
-              stroke="var(--color-all)"
-              stackId="a"
-            />
-          </AreaChart>
+              radius={6}
+              strokeWidth={2}
+              fill="var(--color-all)"
+              activeIndex={activeIndex}
+              activeBar={(props) => (
+                <Rectangle {...props} fillOpacity={0.9} stroke="var(--color-all)" strokeDasharray={4} strokeDashoffset={4} />
+              )}
+            >
+              <LabelList dataKey="all" position="top" />
+            </Bar>
+
+            <Bar
+              dataKey="active"
+              radius={6}
+              strokeWidth={2}
+              fill="var(--color-active)"
+              activeIndex={activeIndex}
+              activeBar={(props) => (
+                <Rectangle {...props} fillOpacity={0.9} stroke="var(--color-active)" strokeDasharray={4} strokeDashoffset={4} />
+              )}
+            >
+              <LabelList dataKey="active" position="top" />
+            </Bar>
+
+            <Bar
+              dataKey="stock"
+              radius={6}
+              strokeWidth={2}
+              fill="var(--color-stock)"
+              activeIndex={activeIndex}
+              activeBar={(props) => (
+                <Rectangle {...props} fillOpacity={0.9} stroke="var(--color-stock)" strokeDasharray={4} strokeDashoffset={4} />
+              )}
+            >
+              <LabelList dataKey="stock" position="top" />
+            </Bar>
+
+            <Bar
+              dataKey="repair"
+              radius={6}
+              strokeWidth={2}
+              fill="var(--color-repair)"
+              activeIndex={activeIndex}
+              activeBar={(props) => (
+                <Rectangle {...props} fillOpacity={0.9} stroke="var(--color-repair)" strokeDasharray={4} strokeDashoffset={4} />
+              )}
+            >
+              <LabelList dataKey="repair" position="top" />
+            </Bar>
+          </BarChart>
         </ChartContainer>
       </CardContent>
     </Card>

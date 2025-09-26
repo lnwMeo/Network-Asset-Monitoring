@@ -38,7 +38,7 @@ export function LoginForm({
   }
 
   return (
-    <div className={cn("flex flex-col gap-6", className)} {...props}>
+    <div className={cn("flex flex-col max-w-5xl gap-6", className)} {...props}>
       <Card className="overflow-hidden  p-0">
         <CardContent className="grid p-0 md:grid-cols-2">
           {/* ==== login form ==== */}
@@ -47,7 +47,7 @@ export function LoginForm({
               <div className="flex flex-col items-center text-center">
                 <h1 className="text-2xl font-bold">Welcome back</h1>
                 <p className="text-muted-foreground text-balance">
-                  NETWORK-ASSET
+                 ระบบรายงานทรัพย์สินด้านระบบสารสนเทศ
                 </p>
               </div>
               <div className="grid gap-3">

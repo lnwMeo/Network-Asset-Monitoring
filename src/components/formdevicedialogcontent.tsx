@@ -397,11 +397,12 @@ export default function FormDeviceDialogContent({
   }
 
   return (
-    <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+    <DialogContent className="max-w-7xl max-h-[90vh] overflow-y-auto">
       <DialogHeader><DialogTitle>{mode === "edit" ? "แก้ไขอุปกรณ์" : "เพิ่มอุปกรณ์ใหม่"}</DialogTitle></DialogHeader>
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic Information */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {/* <div className="grid grid-cols-[minmax(0,1fr),auto] items-start gap-2"> */}
+        <div className="grid grid-cols-1 gap-4 ">
           <div className="grid gap-2">
             <Label htmlFor="assetTag">Asset Tag<span className="text-red-600">*</span></Label>
             <Input id="assetTag" value={form.assetTag} onChange={(e) => setForm(p => ({ ...p, assetTag: e.target.value }))} required />
@@ -414,7 +415,7 @@ export default function FormDeviceDialogContent({
 
           <div className="grid gap-2">
             <Label htmlFor="devicetype">ประเภท<span className="text-red-600">*</span></Label>
-            <div className="flex gap-2">
+            <div className="flex gap-2 w-full">
               <Select
                 value={form.deviceTypeId != null ? String(form.deviceTypeId) : ""}
                 onValueChange={(value) => {
@@ -427,6 +428,7 @@ export default function FormDeviceDialogContent({
                     }
                   }
                 }}
+              
               >
                 <SelectTrigger><SelectValue placeholder="เลือกประเภท" /></SelectTrigger>
                 <SelectContent>
@@ -563,7 +565,7 @@ export default function FormDeviceDialogContent({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="deviceId">รหัสครุภัณฑ์</Label>
+            <Label htmlFor="deviceId">รหัสครุภัณฑ์ / SerialNumber</Label>
             <Input id="deviceId" value={form.deviceId ?? ""} onChange={(e) => setForm(p => ({ ...p, deviceId: e.target.value }))} />
           </div>
 

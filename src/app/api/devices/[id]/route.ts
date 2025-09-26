@@ -24,14 +24,14 @@ async function safeUnlinkPublicFile(url?: string | null) {
 function inferMimeFromExt(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase();
   switch (ext) {
-    case "png":  return "image/png";
+    case "png": return "image/png";
     case "jpg":
     case "jpeg": return "image/jpeg";
     case "webp": return "image/webp";
-    case "gif":  return "image/gif";
-    case "bmp":  return "image/bmp";
-    case "svg":  return "image/svg+xml";
-    default:     return "application/octet-stream";
+    case "gif": return "image/gif";
+    case "bmp": return "image/bmp";
+    case "svg": return "image/svg+xml";
+    default: return "application/octet-stream";
   }
 }
 
@@ -46,7 +46,7 @@ async function statPublicUploadSize(filename: string): Promise<number> {
 }
 
 const badRequest = (m = "Bad request") => NextResponse.json({ error: m }, { status: 400 });
-const notFound  = () => NextResponse.json({ error: "Not found" }, { status: 404 });
+const notFound = () => NextResponse.json({ error: "Not found" }, { status: 404 });
 // const conflict  = (m = "Conflict") => NextResponse.json({ error: m }, { status: 409 });
 const serverErr = (m = "Server error") => NextResponse.json({ error: m }, { status: 500 });
 
@@ -77,7 +77,7 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
 
     if ("assetTag" in body) data.assetTag = String(body.assetTag ?? "");
     if ("deviceId" in body) data.deviceId = body.deviceId ? String(body.deviceId) : String(body.assetTag ?? "");
-    if ("name" in body)     data.name     = String(body.name ?? "");
+    if ("name" in body) data.name = String(body.name ?? "");
 
     // statusId หรือ status (name)
     if ("statusId" in body) {
@@ -87,14 +87,14 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
       data.statusId = st?.id ?? null;
     }
 
-    if ("ip"  in body) data.ipAddress = body.ip  ? String(body.ip).trim()  : null;
-    if ("mac" in body) data.mac       = body.mac ? String(body.mac).trim() : null;
+    if ("ip" in body) data.ipAddress = body.ip ? String(body.ip).trim() : null;
+    if ("mac" in body) data.mac = body.mac ? String(body.mac).trim() : null;
 
     // parse date (string -> Date|null)
     const toDate = (v: any) => v ? new Date(String(v)) : null;
     if ("purchaseDate" in body) data.purchaseDate = toDate(body.purchaseDate);
-    if ("installDate"  in body) data.installDate  = toDate(body.installDate);
-    if ("warrantyEnd"  in body) data.warrantyEnd  = toDate(body.warrantyEnd);
+    if ("installDate" in body) data.installDate = toDate(body.installDate);
+    if ("warrantyEnd" in body) data.warrantyEnd = toDate(body.warrantyEnd);
 
     if ("deviceTypeId" in body) data.deviceTypeId = body.deviceTypeId ?? null;
 
@@ -300,7 +300,7 @@ export async function GET(
 ) {
   try {
     const id = parseInt(params.id)
-    
+
     const device = await prisma.device.findUnique({
       where: { id },
       include: {
@@ -315,7 +315,7 @@ export async function GET(
 
     if (!device) {
       return NextResponse.json(
-        { error: 'Device not found' }, 
+        { error: 'Device not found' },
         { status: 404 }
       )
     }
@@ -325,7 +325,7 @@ export async function GET(
   } catch (error) {
     console.error('Error fetching device:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch device' }, 
+      { error: 'Failed to fetch device' },
       { status: 500 }
     )
   }
